@@ -1,4 +1,4 @@
-REM
+REM     https://github.com/guestart/PL-SQL-For-DBAs/blob/main/recognize_oracle_db_arch.sql
 REM     Script:     recognize_oracle_db_arch.sql
 REM     Author:     Quanwen Zhao
 REM     Dated:      Oct 07, 2022
