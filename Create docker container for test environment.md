@@ -2,340 +2,40 @@
 database: PostgreSQL
 title: Backup and Recovery
 class: pgBackRest
-created: 05/28/2024 00:09
+created: 05/24/2024 21:55
 ---
-## Backup on Same Host
-
-### Environment
-
-| Hostname | IP Address  | OS            | Role                |
-| -------- | ----------- | ------------- | ------------------- |
-| pg01     | 172.28.5.11 | Rocky Linux 9 | PostgreSQL Database |
-
-### pgBackRest Installation
-
-[[pgBackRest 2.5x Installation]]
-
-### pgBackRest repository location
-#### Local repository
-
-**Create pgBackRest configuration file and directories**
-
-```bash
-sudo mkdir -p -m 770 /var/log/pgbackrest
-sudo chown postgres:postgres /var/log/pgbackrest
-sudo mkdir -p /etc/pgbackrest/conf.d
-sudo touch /etc/pgbackrest/pgbackrest.conf
-sudo chmod 640 /etc/pgbackrest/pgbackrest.conf
-sudo chown -R postgres:postgres /etc/pgbackrest/
-```
-
-**Create pgBackRest repository directory**
-
-```sh
-sudo mkdir -p /backup/pgbackrest
-sudo chown postgres:postgres /backup/pgbackrest
-```
-
-**PostgreSQL parameter configuraitons**
-
-```bash
-sudo -u postgres psql -c "select name, setting from pg_settings where name in ('archive_command','archive_mode','log_filename','max_wal_senders','wal_level','listen_addresses');"
-
-      name       |      setting
------------------+-------------------
- archive_command | (disabled)
- archive_mode    | off
- log_filename    | postgresql-%a.log
- max_wal_senders | 10
- wal_level       | replica
-listen_addresses | localhost
-```
-
->[!note]
->Change " --stanza=pg01"
-
-```bash
-sudo -u postgres psql <<EOF
-alter system set archive_command to 'pgbackrest --stanza=pg01 archive-push %p';
-alter system set archive_mode=on;
-alter system set log_filename='postgresql.log';
--- alter system set max_wal_senders = 3;
-alter system set wal_level = replica;
-alter system set listen_addresses = '*';
-EOF
-```
-
-**PostgreSQL service restart/reload**
-
-```bash
-postgres=# SELECT pg_reload_conf();
- pg_reload_conf
-----------------
- t
-
-postgres=# select name, setting, pending_restart from pg_settings where pending_restart;
-     name     | setting | pending_restart
---------------+---------+-----------------
- archive_mode | off     | t
-```
-
-```bash
-sudo systemctl restart postgresql-16.service
-```
-
-**Repository Encryption**
-
-```bash
-sudo openssl rand -base64 48
-
-6S7bJ8VBfGRbekNUkfIt4wzA8e2oCRdJUpehdPJ1YoOmtDCU5emCiB3/u2ya5FzA
-```
-
-**pgBackRest Configuration**
-
-```sh
-cat << EOF | tee "/etc/pgbackrest/pgbackrest.conf"
-[pg01]
-pg1-path=/var/lib/pgsql/16/data
-
-[global]
-repo1-path=/backup/pgbackrest
-repo1-retention-full=2
-repo1-block=y
-repo1-bundle=y
-repo1-cipher-pass=6S7bJ8VBfGRbekNUkfIt4wzA8e2oCRdJUpehdPJ1YoOmtDCU5emCiB3/u2ya5FzA
-repo1-cipher-type=aes-256-cbc
-
-log-level-console=info
-log-level-file=detail
-process-max=2
-start-fast=y
-delta=y
-EOF
-```
-
-**Create and check stanza**
-
-```sh
-sudo -u postgres pgbackrest --stanza=pg01 stanza-create
-```
-
-```
-2024-05-28 09:13:36.240 P00   INFO: stanza-create command begin 2.52: --exec-id=1223-d7572d21 --log-level-console=info --log-level-file=detail --pg1-path=/var/lib/pgsql/16/data --repo1-path=/backup/pgbackrest --stanza=pg01
-2024-05-28 09:13:36.844 P00   INFO: stanza-create for stanza 'pg01' on repo1
-2024-05-28 09:13:36.851 P00   INFO: stanza-create command end: completed successfully (614ms)
-```
-
-```sh
-sudo -u postgres pgbackrest --stanza=pg01 check
-```
-
-```
-2024-05-28 09:13:51.825 P00   INFO: check command begin 2.52: --exec-id=1226-128215ba --log-level-console=info --log-level-file=detail --pg1-path=/var/lib/pgsql/16/data --repo1-path=/backup/pgbackrest --stanza=pg01
-2024-05-28 09:13:52.429 P00   INFO: check repo1 configuration (primary)
-2024-05-28 09:13:52.630 P00   INFO: check repo1 archive for WAL (primary)
-2024-05-28 09:13:52.730 P00   INFO: WAL segment 000000010000000000000001 successfully archived to '/backup/pgbackrest/archive/pg01/16-1/0000000100000000/000000010000000000000001-133ac708f1db2413dd739712aee509237e544763.gz' on repo1
-2024-05-28 09:13:52.730 P00   INFO: check command end: completed successfully (907ms)
-```
-
-**Backup**
-
-```sh
-sudo -iu postgres pgbackrest --stanza=pg01 --type=full backup
-```
-
-```
-2024-05-28 09:14:10.131 P00   INFO: backup command begin 2.52: --delta --exec-id=1262-9b36c647 --log-level-console=info --log-level-file=detail --pg1-path=/var/lib/pgsql/16/data --process-max=2 --repo1-block --repo1-bundle --repo1-path=/backup/pgbackrest --repo1-retention-full=2 --stanza=pg01 --start-fast --type=full
-2024-05-28 09:14:10.835 P00   INFO: execute non-exclusive backup start: backup begins after the requested immediate checkpoint completes
-2024-05-28 09:14:11.336 P00   INFO: backup start archive = 000000010000000000000003, lsn = 0/3000060
-2024-05-28 09:14:11.336 P00   INFO: check archive for prior segment 000000010000000000000002
-2024-05-28 09:14:12.860 P00   INFO: execute non-exclusive backup stop and wait for all WAL segments to archive
-2024-05-28 09:14:13.061 P00   INFO: backup stop archive = 000000010000000000000003, lsn = 0/3000138
-2024-05-28 09:14:13.062 P00   INFO: check archive for segment(s) 000000010000000000000003:000000010000000000000003
-2024-05-28 09:14:13.068 P00   INFO: new backup label = 20240528-091410F
-2024-05-28 09:14:13.093 P00   INFO: full backup size = 22.1MB, file total = 969
-2024-05-28 09:14:13.093 P00   INFO: backup command end: completed successfully (2964ms)
-2024-05-28 09:14:13.094 P00   INFO: expire command begin 2.52: --exec-id=1262-9b36c647 --log-level-console=info --log-level-file=detail --repo1-path=/backup/pgbackrest --repo1-retention-full=2 --stanza=pg01
-2024-05-28 09:14:13.097 P00   INFO: expire command end: completed successfully (4ms)
-```
-
-```sh
-sudo -iu postgres pgbackrest info
-sudo -iu postgres pgbackrest --stanza=pg01 info
-```
-
-```
-stanza: pg01
-    status: ok
-    cipher: none
-
-    db (current)
-        wal archive min/max (16): 000000010000000000000001/000000010000000000000003
-
-        full backup: 20240528-091410F
-            timestamp start/stop: 2024-05-28 09:14:10-04 / 2024-05-28 09:14:12-04
-            wal start/stop: 000000010000000000000003 / 000000010000000000000003
-            database size: 22.1MB, database backup size: 22.1MB
-            repo1: backup size: 2.9MB
-```
-
-#### S3-Compatible Object Store
-
-[pgBackRest multi-repositories tips and tricks | pgstef’s blog](https://pgstef.github.io/2022/04/15/pgbackrest_multi-repositories_tips_and_tricks.html)
-
-**pgBackRest Configuration**
-
-```sh
-cat << EOF | tee "/etc/pgbackrest/pgbackrest.conf"
-[pg01]
-pg1-path=/var/lib/pgsql/16/data
-
-[global]
-## Local repository
-repo1-path=/backup/pgbackrest
-repo1-retention-full=2
-repo1-block=y
-repo1-bundle=y
-repo1-cipher-pass=6S7bJ8VBfGRbekNUkfIt4wzA8e2oCRdJUpehdPJ1YoOmtDCU5emCiB3/u2ya5FzA
-repo1-cipher-type=aes-256-cbc
-
-## OCI S3-compatible bucket repository
-repo2-type=s3
-repo2-storage-verify-tls=n
-repo2-s3-endpoint=https://frkaqewuw7qz.compat.objectstorage.eu-frankfurt-1.oraclecloud.com
-repo2-s3-uri-style=path
-repo2-s3-bucket=ocigelibolbucket
-repo2-s3-key=3167461162edd5f0d67b092fd777bae183e75194
-repo2-s3-key-secret=mqey2WEBNEpnLhN6t/2E3vYMchLhjY5LTHdCP7JjAZk=
-repo2-s3-region=eu-frankfurt-1
-repo2-path=/pgbackrest
-repo2-retention-full=2
-repo2-block=y
-repo2-bundle=y
-repo2-cipher-pass=6S7bJ8VBfGRbekNUkfIt4wzA8e2oCRdJUpehdPJ1YoOmtDCU5emCiB3/u2ya5FzA
-repo2-cipher-type=aes-256-cbc
-
-log-level-console=info
-log-level-file=detail
-process-max=2
-start-fast=y
-delta=y
-EOF
-```
-
-**Create and check stanza**
-
-```sh
-sudo -u postgres pgbackrest --stanza=pg01 stanza-create
-```
-
-```
-2024-05-28 09:30:33.146 P00   INFO: stanza-create command begin 2.52: --exec-id=1572-409c1da4 --log-level-console=info --log-level-file=detail --pg1-path=/var/lib/pgsql/16/data --repo1-path=/backup/pgbackrest --repo2-path=/pgbackrest --repo2-s3-bucket=ocigelibolbucket --repo2-s3-endpoint=https://frkaqewuw7qz.compat.objectstorage.eu-frankfurt-1.oraclecloud.com --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=eu-frankfurt-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=pg01
-2024-05-28 09:30:33.750 P00   INFO: stanza-create for stanza 'pg01' on repo1
-2024-05-28 09:30:33.750 P00   INFO: stanza 'pg01' already exists on repo1 and is valid
-2024-05-28 09:30:33.750 P00   INFO: stanza-create for stanza 'pg01' on repo2
-2024-05-28 09:30:35.615 P00   INFO: stanza-create command end: completed successfully (2471ms)
-```
-
-```sh
-sudo -u postgres pgbackrest --stanza=pg01 check
-```
-
-```
-2024-05-28 09:30:42.354 P00   INFO: check command begin 2.52: --exec-id=1575-e544f1d1 --log-level-console=info --log-level-file=detail --pg1-path=/var/lib/pgsql/16/data --repo1-path=/backup/pgbackrest --repo2-path=/pgbackrest --repo2-s3-bucket=ocigelibolbucket --repo2-s3-endpoint=https://frkaqewuw7qz.compat.objectstorage.eu-frankfurt-1.oraclecloud.com --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=eu-frankfurt-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=pg01
-2024-05-28 09:30:42.958 P00   INFO: check repo1 configuration (primary)
-2024-05-28 09:30:42.959 P00   INFO: check repo2 configuration (primary)
-2024-05-28 09:30:43.756 P00   INFO: check repo1 archive for WAL (primary)
-2024-05-28 09:30:44.358 P00   INFO: WAL segment 000000010000000000000004 successfully archived to '/backup/pgbackrest/archive/pg01/16-1/0000000100000000/000000010000000000000004-91250f236465651e87e6c565576047329a0741b7.gz' on repo1
-2024-05-28 09:30:44.358 P00   INFO: check repo2 archive for WAL (primary)
-2024-05-28 09:30:45.010 P00   INFO: WAL segment 000000010000000000000004 successfully archived to '/pgbackrest/archive/pg01/16-1/0000000100000000/000000010000000000000004-91250f236465651e87e6c565576047329a0741b7.gz' on repo2
-2024-05-28 09:30:45.010 P00   INFO: check command end: completed successfully (2658ms)
-```
-
-**Backup**
-
-```sh
-sudo -iu postgres pgbackrest --stanza=pg01 --type=full backup
-sudo -iu postgres pgbackrest --stanza=pg01 --type=full backup --repo=1
-sudo -iu postgres pgbackrest --stanza=pg01 --type=full backup --repo=2
-```
-
-```
-2024-05-28 09:31:55.702 P00   INFO: backup command begin 2.52: --delta --exec-id=1594-cebf3f3e --log-level-console=info --log-level-file=detail --pg1-path=/var/lib/pgsql/16/data --process-max=2 --repo1-block --repo2-block --repo1-bundle --repo2-bundle --repo1-path=/backup/pgbackrest --repo2-path=/pgbackrest --repo1-retention-full=2 --repo2-retention-full=2 --repo2-s3-bucket=ocigelibolbucket --repo2-s3-endpoint=https://frkaqewuw7qz.compat.objectstorage.eu-frankfurt-1.oraclecloud.com --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=eu-frankfurt-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=pg01 --start-fast --type=full
-2024-05-28 09:31:55.702 P00   INFO: repo option not specified, defaulting to repo1
-2024-05-28 09:31:56.406 P00   INFO: execute non-exclusive backup start: backup begins after the requested immediate checkpoint completes
-2024-05-28 09:31:56.906 P00   INFO: backup start archive = 000000010000000000000006, lsn = 0/6000028
-2024-05-28 09:31:56.906 P00   INFO: check archive for prior segment 000000010000000000000005
-2024-05-28 09:31:59.857 P00   INFO: execute non-exclusive backup stop and wait for all WAL segments to archive
-2024-05-28 09:32:00.057 P00   INFO: backup stop archive = 000000010000000000000006, lsn = 0/6000100
-2024-05-28 09:32:00.060 P00   INFO: check archive for segment(s) 000000010000000000000006:000000010000000000000006
-2024-05-28 09:32:00.668 P00   INFO: new backup label = 20240528-093156F
-2024-05-28 09:32:00.700 P00   INFO: full backup size = 22.1MB, file total = 969
-2024-05-28 09:32:00.700 P00   INFO: backup command end: completed successfully (5001ms)
-2024-05-28 09:32:00.701 P00   INFO: expire command begin 2.52: --exec-id=1594-cebf3f3e --log-level-console=info --log-level-file=detail --repo1-path=/backup/pgbackrest --repo2-path=/pgbackrest --repo1-retention-full=2 --repo2-retention-full=2 --repo2-s3-bucket=ocigelibolbucket --repo2-s3-endpoint=https://frkaqewuw7qz.compat.objectstorage.eu-frankfurt-1.oraclecloud.com --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=eu-frankfurt-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=pg01
-2024-05-28 09:32:00.705 P00   INFO: repo1: 16-1 remove archive, start = 000000010000000000000001, stop = 000000010000000000000002
-2024-05-28 09:32:01.844 P00   INFO: expire command end: completed successfully (1144ms)
-```
-
-```sh
-sudo -iu postgres pgbackrest info
-sudo -iu postgres pgbackrest --repo=1 info
-sudo -iu postgres pgbackrest --repo=2 info
-```
-
-```
-stanza: pg01
-    status: ok
-    cipher: none
-
-    db (current)
-        wal archive min/max (16): 000000010000000000000006/00000001000000000000000C
-
-        full backup: 20240528-093156F
-            timestamp start/stop: 2024-05-28 09:31:56-04 / 2024-05-28 09:31:59-04
-            wal start/stop: 000000010000000000000006 / 000000010000000000000006
-            database size: 22.1MB, database backup size: 22.1MB
-            repo1: backup size: 2.9MB
-
-        full backup: 20240528-093312F
-            timestamp start/stop: 2024-05-28 09:33:12-04 / 2024-05-28 09:33:15-04
-            wal start/stop: 000000010000000000000008 / 000000010000000000000008
-            database size: 22.1MB, database backup size: 22.1MB
-            repo1: backup size: 2.9MB
-
-        full backup: 20240528-093324F
-            timestamp start/stop: 2024-05-28 09:33:24-04 / 2024-05-28 09:33:28-04
-            wal start/stop: 00000001000000000000000A / 00000001000000000000000A
-            database size: 22.1MB, database backup size: 22.1MB
-            repo2: backup size: 2.9MB
-
-        full backup: 20240528-093432F
-            timestamp start/stop: 2024-05-28 09:34:32-04 / 2024-05-28 09:34:38-04
-            wal start/stop: 00000001000000000000000C / 00000001000000000000000C
-            database size: 22.1MB, database backup size: 22.1MB
-            repo2: backup size: 2.9MB
-```
-
-## Backup on Dedicated Repository Host
-
-### Environment
+## Environment
 
 | Hostname   | IP Address  | OS            | Role                     | Verison |
 | ---------- | ----------- | ------------- | ------------------------ | ------- |
 | pg01       | 172.28.5.11 | Rocky Linux 9 | PostgreSQL Database      | 16.3    |
 | pg02       | 172.28.5.12 | Rocky Linux 9 | PostgreSQL Database      | 16.3    |
+| pg03       | 172.28.5.13 | Rocky Linux 9 | PostgreSQL Database      | 16.3    |
 | pgbackup01 | 172.28.5.15 | Rocky Linux 9 | pgBackRest Backup Server | 2.51    |
 
-### pgBackRest Installation
+```
+patronictl -c /etc/patroni/patroni.yml list
+
++ Cluster: demo-cluster-1 (7374443775163790452) --+-----------+
+| Member | Host        | Role    | State     | TL | Lag in MB |
++--------+-------------+---------+-----------+----+-----------+
+| pg01   | 172.28.5.11 | Leader  | running   |  1 |           |
+| pg02   | 172.28.5.12 | Replica | streaming |  1 |         0 |
+| pg03   | 172.28.5.13 | Replica | streaming |  1 |         0 |
++--------+-------------+---------+-----------+----+-----------+
+```
+
+![[Pasted image 20240527120220.png]]
+
+## pgBackRest Installation
 
 >[!note]
 >Install pgBackRest on all database and repository servers
 
 [[pgBackRest 2.5x Installation]]
 
-### pgBackRest Configuration
-#### Repository Server Configuration
+## pgBackRest Configuration
+### Repository Server Configuration
 
 **Create pgBackRest user**
 
@@ -388,10 +88,11 @@ log-level-file=detail
 process-max=2
 start-fast=y
 delta=y
+backup-standby=y
 EOF
 ```
 
-#### PostgreSQL Server Configuration
+### PostgreSQL Server Configuration
 
 **Create pgBackRest configuration file and directories**
 
@@ -409,220 +110,48 @@ sudo chown -R postgres:postgres /etc/pgbackrest/
 ```bash
 sudo -u postgres psql -c "select name, setting from pg_settings where name in ('archive_command','archive_mode','log_filename','max_wal_senders','wal_level','listen_addresses');"
 
-      name       |      setting
------------------+-------------------
- archive_command | (disabled)
- archive_mode    | off
- log_filename    | postgresql-%a.log
- max_wal_senders | 10
- wal_level       | replica
-listen_addresses | localhost
+       name       |      setting
+------------------+-------------------
+ archive_command  | /bin/true
+ archive_mode     | on
+ listen_addresses | 0.0.0.0
+ log_filename     | postgresql-%a.log
+ max_wal_senders  | 10
+ wal_level        | replica
 ```
 
 >[!note]
->Change "--stanza=pg01"
+>Change "--stanza=demo-cluster-1"
 
-```bash
-sudo -u postgres psql <<EOF
-alter system set archive_command to 'pgbackrest --stanza=pg01 archive-push %p';
-alter system set archive_mode=on;
-alter system set log_filename='postgresql.log';
--- alter system set max_wal_senders = 3;
-alter system set wal_level = replica;
-alter system set listen_addresses = '*';
-EOF
-```
-
-**Restart or reload PostgreSQL service**
-
-```bash
-postgres=# SELECT pg_reload_conf();
- pg_reload_conf
-----------------
- t
-
-postgres=# select name, setting, pending_restart from pg_settings where pending_restart;
-     name     | setting | pending_restart
---------------+---------+-----------------
- archive_mode | off     | t
-```
-
-```bash
-sudo systemctl restart postgresql-16.service
-```
-
-### pgBackRest enable communication between the hosts
-
-#### Option 1: Setup Passwordless SSH
-
-**repository ⇒**
-```bash
-sudo -u pgbackrest ssh-keygen -f /home/pgbackrest/.ssh/id_rsa -t rsa -b 4096 -N ""
-sudo -iu pgbackrest ssh-copy-id -i /home/pgbackrest/.ssh/id_rsa.pub postgres@pg01
-sudo -iu pgbackrest ssh-copy-id -i /home/pgbackrest/.ssh/id_rsa.pub postgres@pg02
-```
-
-**pg01-pg02 ⇒**
-```bash
-sudo -u postgres ssh-keygen -f /var/lib/pgsql/.ssh/id_rsa -t rsa -b 4096 -N ""
-sudo -iu postgres ssh-copy-id -i /var/lib/pgsql/.ssh/id_rsa.pub pgbackrest@pgbackup01
-```
-
-Test that connections can be made from **repository** to **pgmel34** and vice versa.
-
-**repository ⇒** Test connection from **repository** to **pg01**
-```bash
-sudo -u pgbackrest ssh postgres@pg01 date
-sudo -u pgbackrest ssh postgres@pg02 date
-```
-
-**pg01-pg02 ⇒** Test connection from **pg01** to **repository**
-```bash
-sudo -u postgres ssh pgbackrest@pgbackup01 date
-```
-
-**Edit pgbackrest.conf configuration file**
-
-**repository ⇒**
-```sh
-cat << EOF | tee "/etc/pgbackrest/conf.d/pg01.conf"
-[pg01]
-pg1-host=pg01
-pg1-path=/var/lib/pgsql/16/data
-EOF
-
-cat << EOF | tee "/etc/pgbackrest/conf.d/pg02.conf"
-[pg02]
-pg1-host=pg02
-pg1-path=/var/lib/pgsql/16/data
-EOF
-
-chown -R pgbackrest:pgbackrest /etc/pgbackrest/conf.d/
-```
-
-**pg01-pg02 ⇒**
-```sh
-cat << EOF | tee "/etc/pgbackrest/pgbackrest.conf"
-[global]
-repo1-host=pgbackup01
-
-process-max=2
-log-level-console=info
-log-level-file=detail
-start-fast=y
-delta=y
-EOF
-```
-
-**pg01 ⇒**
-```sh
-cat << EOF | tee "/etc/pgbackrest/conf.d/pg01.conf"
-[pg01]
-pg1-path=/var/lib/pgsql/16/data
-EOF
-chown -R postgres:postgres /etc/pgbackrest/conf.d/
-```
-
-**pg02 ⇒**
-```sh
-cat << EOF | tee "/etc/pgbackrest/conf.d/pg02.conf"
-[pg02]
-pg1-path=/var/lib/pgsql/16/data
-EOF
-chown -R postgres:postgres /etc/pgbackrest/conf.d/
-```
-
-**Create and check stanza**
+Let’s adjust the `archive_command` in Patroni configuration:
 
 ```sh
-sudo -u pgbackrest pgbackrest --stanza=pg01 stanza-create
-sudo -u pgbackrest pgbackrest --stanza=pg02 stanza-create
-```
+sudo -iu postgres patronictl -c /etc/patroni/patroni.yml edit-config
 
-```
-2024-05-28 10:54:01.276 P00   INFO: stanza-create command begin 2.52: --exec-id=1595-6ff8d756 --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg1-path=/var/lib/pgsql/16/data --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --stanza=pg01
-2024-05-28 10:54:02.038 P00   INFO: stanza-create for stanza 'pg01' on repo1
-2024-05-28 10:54:02.145 P00   INFO: stanza-create command end: completed successfully (871ms)
+## adjust the following lines
+postgresql:
+  parameters:
+    archive_command: pgbackrest --stanza=demo-cluster-1 archive-push "%p"
 ```
 
 ```sh
-sudo -u pgbackrest pgbackrest --stanza=pg01 check
-sudo -u pgbackrest pgbackrest --stanza=pg02 check
+sudo -iu postgres patronictl -c /etc/patroni/patroni.yml reload demo-cluster-1
 ```
 
-```
-2024-05-28 10:54:19.529 P00   INFO: check command begin 2.52: --exec-id=1602-3eebec63 --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg1-path=/var/lib/pgsql/16/data --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --stanza=pg01
-2024-05-28 10:54:20.285 P00   INFO: check repo1 configuration (primary)
-2024-05-28 10:54:20.487 P00   INFO: check repo1 archive for WAL (primary)
-2024-05-28 10:54:21.088 P00   INFO: WAL segment 000000010000000000000001 successfully archived to '/backup/pgbackrest/archive/pg01/16-1/0000000100000000/000000010000000000000001-c2d8e71823577905d72faf049cf073652aa04191.gz' on repo1
-2024-05-28 10:54:21.188 P00   INFO: check command end: completed successfully (1661ms)
-```
+## pgBackRest enable communication between the hosts
 
-**Backup**
-
-```sh
-sudo -iu pgbackrest pgbackrest --stanza=pg01 --type=full backup
-sudo -iu pgbackrest pgbackrest --stanza=pg02 --type=full backup
-```
-
-```
-2024-05-28 10:54:54.581 P00   INFO: backup command begin 2.52: --compress-type=gz --delta --exec-id=1643-3e7b5a55 --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg1-path=/var/lib/pgsql/16/data --process-max=2 --repo1-block --repo1-bundle --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --repo1-retention-full=2 --stanza=pg01 --start-fast --type=full
-2024-05-28 10:54:55.440 P00   INFO: execute non-exclusive backup start: backup begins after the requested immediate checkpoint completes
-2024-05-28 10:54:55.942 P00   INFO: backup start archive = 000000010000000000000003, lsn = 0/3000028
-2024-05-28 10:54:55.942 P00   INFO: check archive for prior segment 000000010000000000000002
-2024-05-28 10:54:58.377 P00   INFO: execute non-exclusive backup stop and wait for all WAL segments to archive
-2024-05-28 10:54:58.578 P00   INFO: backup stop archive = 000000010000000000000003, lsn = 0/3000138
-2024-05-28 10:54:58.583 P00   INFO: check archive for segment(s) 000000010000000000000003:000000010000000000000003
-2024-05-28 10:54:58.992 P00   INFO: new backup label = 20240528-105455F
-2024-05-28 10:54:59.020 P00   INFO: full backup size = 22.1MB, file total = 969
-2024-05-28 10:54:59.020 P00   INFO: backup command end: completed successfully (4441ms)
-2024-05-28 10:54:59.021 P00   INFO: expire command begin 2.52: --exec-id=1643-3e7b5a55 --log-level-console=info --log-level-file=detail --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --repo1-retention-full=2 --stanza=pg01
-2024-05-28 10:54:59.024 P00   INFO: expire command end: completed successfully (4ms)
-```
-
-```sh
-sudo -iu pgbackrest pgbackrest info
-sudo -iu pgbackrest pgbackrest --stanza=pg01 info
-```
-
-```
-stanza: pg01
-    status: ok
-    cipher: aes-256-cbc
-
-    db (current)
-        wal archive min/max (16): 000000010000000000000001/000000010000000000000003
-
-        full backup: 20240528-105455F
-            timestamp start/stop: 2024-05-28 10:54:55-04 / 2024-05-28 10:54:58-04
-            wal start/stop: 000000010000000000000003 / 000000010000000000000003
-            database size: 22.1MB, database backup size: 22.1MB
-            repo1: backup size: 3.0MB
-
-stanza: pg02
-    status: ok
-    cipher: aes-256-cbc
-
-    db (current)
-        wal archive min/max (16): 000000010000000000000001/000000010000000000000003
-
-        full backup: 20240528-105511F
-            timestamp start/stop: 2024-05-28 10:55:11-04 / 2024-05-28 10:55:14-04
-            wal start/stop: 000000010000000000000003 / 000000010000000000000003
-            database size: 22.1MB, database backup size: 22.1MB
-            repo1: backup size: 3.0MB
-```
-
-#### Option 2: Setup TLS
+### Option 2: Setup TLS
 
 **Create environment variables to simplify the config file creation:**
 
-**repository-pg01-pg02: ⇒**
+**repository-pg01-pg02-pg03: ⇒**
 ```sh
 export REPO_SRV_NAME="pgbackup01"
 export NODE_NAME=`hostname -f`
 export NODE1_NAME="pg01"
 export NODE2_NAME="pg02"
+export NODE3_NAME="pg03"
+CLUSTER_NAME="demo-cluster-1"
 export CA_PATH="/etc/pgbackrest/certs"
 ```
 
@@ -639,15 +168,16 @@ tls-server-key-file=${CA_PATH}/${REPO_SRV_NAME}.key
 tls-server-ca-file=${CA_PATH}/ca.crt 
 
 ### Auth entry ###
-tls-server-auth=${NODE1_NAME}=${NODE1_NAME}
-tls-server-auth=${NODE2_NAME}=${NODE2_NAME}
+tls-server-auth=${NODE1_NAME}=${CLUSTER_NAME}
+tls-server-auth=${NODE2_NAME}=${CLUSTER_NAME}
+tls-server-auth=${NODE3_NAME}=${CLUSTER_NAME}
 EOF
 ```
 
 **repository: ⇒**
 ```sh
-cat << EOF | tee "/etc/pgbackrest/conf.d/pg01.conf"
-[${NODE1_NAME}]
+cat << EOF | tee "/etc/pgbackrest/conf.d/${CLUSTER_NAME}.conf"
+[${CLUSTER_NAME}]
 pg1-host=${NODE1_NAME}
 pg1-host-port=8432
 pg1-port=5432
@@ -656,24 +186,32 @@ pg1-host-type=tls
 pg1-host-cert-file=${CA_PATH}/${REPO_SRV_NAME}.crt
 pg1-host-key-file=${CA_PATH}/${REPO_SRV_NAME}.key
 pg1-host-ca-file=${CA_PATH}/ca.crt
-EOF
 
-cat << EOF | tee "/etc/pgbackrest/conf.d/pg02.conf"
-[${NODE2_NAME}]
-pg1-host=${NODE2_NAME}
-pg1-host-port=8432
-pg1-port=5432
-pg1-path=/var/lib/pgsql/16/data
-pg1-host-type=tls
-pg1-host-cert-file=${CA_PATH}/${REPO_SRV_NAME}.crt
-pg1-host-key-file=${CA_PATH}/${REPO_SRV_NAME}.key
-pg1-host-ca-file=${CA_PATH}/ca.crt
+pg2-host=${NODE2_NAME}
+pg2-host-port=8432
+pg2-port=5432
+pg2-path=/var/lib/pgsql/16/data
+pg2-host-type=tls
+pg2-host-cert-file=${CA_PATH}/${REPO_SRV_NAME}.crt
+pg2-host-key-file=${CA_PATH}/${REPO_SRV_NAME}.key
+pg2-host-ca-file=${CA_PATH}/ca.crt
+pg2-socket-path=/var/run/postgresql 
+
+pg3-host=${NODE3_NAME}
+pg3-host-port=8432
+pg3-port=5432
+pg3-path=/var/lib/pgsql/16/data
+pg3-host-type=tls
+pg3-host-cert-file=${CA_PATH}/${REPO_SRV_NAME}.crt
+pg3-host-key-file=${CA_PATH}/${REPO_SRV_NAME}.key
+pg3-host-ca-file=${CA_PATH}/ca.crt
+pg3-socket-path=/var/run/postgresql
 EOF
 
 chown -R pgbackrest:pgbackrest /etc/pgbackrest/conf.d/
 ```
 
-**pg01-pg02 ⇒**
+**pg01-pg02-pg03 ⇒**
 ```sh
 cat << EOF | tee "/etc/pgbackrest/pgbackrest.conf"
 [global]
@@ -696,14 +234,14 @@ tls-server-address=*
 tls-server-cert-file=${CA_PATH}/${NODE_NAME}.crt
 tls-server-key-file=${CA_PATH}/${NODE_NAME}.key
 tls-server-ca-file=${CA_PATH}/ca.crt
-tls-server-auth=${REPO_SRV_NAME}=${NODE_NAME}
+tls-server-auth=${REPO_SRV_NAME}=${CLUSTER_NAME}
 EOF
 ```
 
-**pg01-pg02 ⇒**
+**pg01-pg02-pg03 ⇒**
 ```sh
-cat << EOF | tee "/etc/pgbackrest/conf.d/${NODE_NAME}.conf"
-[${NODE_NAME}]
+cat << EOF | tee "/etc/pgbackrest/conf.d/${CLUSTER_NAME}.conf"
+[${CLUSTER_NAME}]
 pg1-path=/var/lib/pgsql/16/data
 EOF
 chown -R postgres:postgres /etc/pgbackrest/conf.d/
@@ -733,7 +271,7 @@ chmod 0600 ${CA_PATH}/*
 
 Then, you have to deploy it on each server (`ca.crt` + `server_name.crt` + `server_name.key`).
 
-**pg01-pg02: ⇒**
+**pg01-pg02-pg03: ⇒**
 ```bash
 mkdir -p ${CA_PATH}
 scp pgbackrest@${REPO_SRV_NAME}:${CA_PATH}/{ca.crt,`hostname`.*} ${CA_PATH}/
@@ -742,7 +280,7 @@ chmod 0600 ${CA_PATH}/*
 ```
 
 ```bash
-ls
+ls ${CA_PATH}/
 
 ca.crt	pg01.crt  pg01.key
 ```
@@ -775,7 +313,7 @@ WantedBy=multi-user.target
 EOF
 ```
 
-**pg01-pg02:**
+**pg01-pg02-pg03:**
 ```sh
 cat << EOF | tee "/etc/systemd/system/pgbackrest.service"
 [Unit]
@@ -814,86 +352,75 @@ sudo -u postgres pgbackrest server-ping
 **Create and check stanza**
 
 ```sh
-sudo -u pgbackrest pgbackrest --stanza=pg01 stanza-create
-sudo -u pgbackrest pgbackrest --stanza=pg02 stanza-create
+sudo -u pgbackrest pgbackrest --stanza=demo-cluster-1 stanza-create
 ```
 
 ```
-2024-05-28 11:55:58.299 P00   INFO: stanza-create command begin 2.52: --exec-id=2915-ab6fa826 --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg1-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg1-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg1-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg1-host-port=8432 --pg1-host-type=tls --pg1-path=/var/lib/pgsql/16/data --pg1-port=5432 --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --stanza=pg01
-2024-05-28 11:55:58.913 P00   INFO: stanza-create for stanza 'pg01' on repo1
-2024-05-28 11:55:58.919 P00   INFO: stanza-create command end: completed successfully (622ms)
+2024-05-29 12:15:13.990 P00   INFO: stanza-create command begin 2.52: --exec-id=1527-ee48d58d --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg2-host=pg02 --pg3-host=pg03 --pg1-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg2-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg3-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg1-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg2-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg3-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg1-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg2-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg3-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg1-host-port=8432 --pg2-host-port=8432 --pg3-host-port=8432 --pg1-host-type=tls --pg2-host-type=tls --pg3-host-type=tls --pg1-path=/var/lib/pgsql/16/data --pg2-path=/var/lib/pgsql/16/data --pg3-path=/var/lib/pgsql/16/data --pg1-port=5432 --pg2-port=5432 --pg3-port=5432 --pg2-socket-path=/var/run/postgresql --pg3-socket-path=/var/run/postgresql --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --stanza=demo-cluster-1
+2024-05-29 12:15:15.832 P00   INFO: stanza-create for stanza 'demo-cluster-1' on repo1
+2024-05-29 12:15:15.839 P00   INFO: stanza-create command end: completed successfully (1851ms)
 ```
 
 ```sh
-sudo -u pgbackrest pgbackrest --stanza=pg01 check
-sudo -u pgbackrest pgbackrest --stanza=pg02 check
+sudo -u pgbackrest pgbackrest --stanza=demo-cluster-1 check
 ```
 
 ```
-2024-05-28 11:56:15.729 P00   INFO: check command begin 2.52: --exec-id=2927-0178253a --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg1-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg1-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg1-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg1-host-port=8432 --pg1-host-type=tls --pg1-path=/var/lib/pgsql/16/data --pg1-port=5432 --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --stanza=pg01
-2024-05-28 11:56:16.342 P00   INFO: check repo1 configuration (primary)
-2024-05-28 11:56:16.543 P00   INFO: check repo1 archive for WAL (primary)
-2024-05-28 11:56:16.644 P00   INFO: WAL segment 000000010000000000000004 successfully archived to '/backup/pgbackrest/archive/pg01/16-1/0000000100000000/000000010000000000000004-3c0280b1da0a5abcaba4d9f69cc3ead90b9793ef.gz' on repo1
-2024-05-28 11:56:16.644 P00   INFO: check command end: completed successfully (917ms)
+2024-05-29 12:20:29.575 P00   INFO: check command begin 2.52: --backup-standby --exec-id=1598-3c150d94 --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg2-host=pg02 --pg3-host=pg03 --pg1-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg2-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg3-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg1-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg2-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg3-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg1-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg2-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg3-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg1-host-port=8432 --pg2-host-port=8432 --pg3-host-port=8432 --pg1-host-type=tls --pg2-host-type=tls --pg3-host-type=tls --pg1-path=/var/lib/pgsql/16/data --pg2-path=/var/lib/pgsql/16/data --pg3-path=/var/lib/pgsql/16/data --pg1-port=5432 --pg2-port=5432 --pg3-port=5432 --pg2-socket-path=/var/run/postgresql --pg3-socket-path=/var/run/postgresql --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --stanza=demo-cluster-1
+2024-05-29 12:20:31.417 P00   INFO: check repo1 (standby)
+2024-05-29 12:20:31.417 P00   INFO: switch wal not performed because this is a standby
+2024-05-29 12:20:31.417 P00   INFO: check repo1 configuration (primary)
+2024-05-29 12:20:31.618 P00   INFO: check repo1 archive for WAL (primary)
+2024-05-29 12:20:31.719 P00   INFO: WAL segment 000000010000000000000006 successfully archived to '/backup/pgbackrest/archive/demo-cluster-1/16-1/0000000100000000/000000010000000000000006-5455c0bc644cf022adaa8fa128289df4e40e2661.gz' on repo1
+2024-05-29 12:20:31.720 P00   INFO: check command end: completed successfully (2147ms)
 ```
 
 **Backup**
 
 ```sh
-sudo -iu pgbackrest pgbackrest --stanza=pg01 --type=full backup
-sudo -iu pgbackrest pgbackrest --stanza=pg02 --type=full backup
+sudo -iu pgbackrest pgbackrest --stanza=demo-cluster-1 --type=full backup
 ```
 
 ```
-2024-05-28 11:56:31.720 P00   INFO: backup command begin 2.52: --compress-type=gz --delta --exec-id=2930-6b0da1f5 --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg1-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg1-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg1-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg1-host-port=8432 --pg1-host-type=tls --pg1-path=/var/lib/pgsql/16/data --pg1-port=5432 --process-max=2 --repo1-block --repo1-bundle --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --repo1-retention-full=2 --stanza=pg01 --start-fast --type=full
-2024-05-28 11:56:32.435 P00   INFO: execute non-exclusive backup start: backup begins after the requested immediate checkpoint completes
-2024-05-28 11:56:32.937 P00   INFO: backup start archive = 000000010000000000000006, lsn = 0/6000028
-2024-05-28 11:56:32.937 P00   INFO: check archive for prior segment 000000010000000000000005
-2024-05-28 11:56:34.003 P00   INFO: execute non-exclusive backup stop and wait for all WAL segments to archive
-2024-05-28 11:56:34.204 P00   INFO: backup stop archive = 000000010000000000000006, lsn = 0/6000100
-2024-05-28 11:56:34.206 P00   INFO: check archive for segment(s) 000000010000000000000006:000000010000000000000006
-2024-05-28 11:56:34.213 P00   INFO: new backup label = 20240528-115632F
-2024-05-28 11:56:34.242 P00   INFO: full backup size = 22.1MB, file total = 969
-2024-05-28 11:56:34.242 P00   INFO: backup command end: completed successfully (2524ms)
-2024-05-28 11:56:34.243 P00   INFO: expire command begin 2.52: --exec-id=2930-6b0da1f5 --log-level-console=info --log-level-file=detail --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --repo1-retention-full=2 --stanza=pg01
-2024-05-28 11:56:34.246 P00   INFO: expire command end: completed successfully (4ms)
+2024-05-29 12:20:55.658 P00   INFO: backup command begin 2.52: --backup-standby --delta --exec-id=1611-8a192318 --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg2-host=pg02 --pg3-host=pg03 --pg1-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg2-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg3-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg1-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg2-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg3-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg1-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg2-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg3-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg1-host-port=8432 --pg2-host-port=8432 --pg3-host-port=8432 --pg1-host-type=tls --pg2-host-type=tls --pg3-host-type=tls --pg1-path=/var/lib/pgsql/16/data --pg2-path=/var/lib/pgsql/16/data --pg3-path=/var/lib/pgsql/16/data --pg1-port=5432 --pg2-port=5432 --pg3-port=5432 --pg2-socket-path=/var/run/postgresql --pg3-socket-path=/var/run/postgresql --process-max=2 --repo1-block --repo1-bundle --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --repo1-retention-full=2 --stanza=demo-cluster-1 --start-fast --type=full
+2024-05-29 12:20:57.601 P00   INFO: execute non-exclusive backup start: backup begins after the requested immediate checkpoint completes
+2024-05-29 12:20:58.102 P00   INFO: backup start archive = 000000010000000000000008, lsn = 0/8000028
+2024-05-29 12:20:58.102 P00   INFO: wait for replay on the standby to reach 0/8000028
+2024-05-29 12:20:58.404 P00   INFO: replay on the standby reached 0/8000028
+2024-05-29 12:20:58.404 P00   INFO: check archive for prior segment 000000010000000000000007
+2024-05-29 12:21:00.127 P00   INFO: execute non-exclusive backup stop and wait for all WAL segments to archive
+2024-05-29 12:21:00.328 P00   INFO: backup stop archive = 000000010000000000000008, lsn = 0/8000138
+2024-05-29 12:21:00.335 P00   INFO: check archive for segment(s) 000000010000000000000008:000000010000000000000008
+2024-05-29 12:21:00.343 P00   INFO: new backup label = 20240529-122057F
+2024-05-29 12:21:00.378 P00   INFO: full backup size = 22.2MB, file total = 974
+2024-05-29 12:21:00.379 P00   INFO: backup command end: completed successfully (4723ms)
+2024-05-29 12:21:00.379 P00   INFO: expire command begin 2.52: --exec-id=1611-8a192318 --log-level-console=info --log-level-file=detail --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --repo1-retention-full=2 --stanza=demo-cluster-1
+2024-05-29 12:21:00.383 P00   INFO: expire command end: completed successfully (4ms)
 ```
 
 ```sh
 sudo -iu pgbackrest pgbackrest info
-sudo -iu pgbackrest pgbackrest --stanza=pg01 info
-sudo -iu pgbackrest pgbackrest --stanza=pg02 info
+sudo -iu pgbackrest pgbackrest --stanza=demo-cluster-1 info
 ```
 
 ```
-stanza: pg01
+stanza: demo-cluster-1
     status: ok
     cipher: aes-256-cbc
 
     db (current)
-        wal archive min/max (16): 000000010000000000000004/000000010000000000000006
+        wal archive min/max (16): 000000010000000000000005/000000010000000000000008
 
-        full backup: 20240528-115632F
-            timestamp start/stop: 2024-05-28 11:56:32-04 / 2024-05-28 11:56:34-04
-            wal start/stop: 000000010000000000000006 / 000000010000000000000006
-            database size: 22.1MB, database backup size: 22.1MB
-            repo1: backup size: 3.0MB
-
-stanza: pg02
-    status: ok
-    cipher: aes-256-cbc
-
-    db (current)
-        wal archive min/max (16): 000000010000000000000004/000000010000000000000005
-
-        full backup: 20240528-115637F
-            timestamp start/stop: 2024-05-28 11:56:37-04 / 2024-05-28 11:56:40-04
-            wal start/stop: 000000010000000000000005 / 000000010000000000000005
-            database size: 22.1MB, database backup size: 22.1MB
+        full backup: 20240529-122057F
+            timestamp start/stop: 2024-05-29 12:20:57-04 / 2024-05-29 12:21:00-04
+            wal start/stop: 000000010000000000000008 / 000000010000000000000008
+            database size: 22.2MB, database backup size: 22.2MB
             repo1: backup size: 3.0MB
 ```
 
-### S3-Compatible Object Store
+## S3-Compatible Object Store
+
+### OCI Bucket
 
 **pgBackRest Configuration**
 
@@ -941,58 +468,137 @@ repo2-cipher-type=aes-256-cbc
 EOF
 ```
 
+### Minio
+
+[[PgBackRest - S3 and S3-Compatible Object Store Support (Minio, OCI, etc...)]]
+
+**pgBackRest Configuration**
+
+Repository Encryption
+
+```bash
+sudo openssl rand -base64 48
+
+6S7bJ8VBfGRbekNUkfIt4wzA8e2oCRdJUpehdPJ1YoOmtDCU5emCiB3/u2ya5FzA
+```
+
+**repository: ⇒**
+```sh
+export URL="minio01:9000"
+export BUCKET_NAME="postgresql"
+export ACCESS_KEY="OK4csiRFTinOcaOxQZ90"
+export SECRET_KEY="YdNuPFknihjKu2hKgl8BtnBO5Wc8yFZdoaBTv9wR"
+export REGION="us-east-1"
+
+cat <<EOF >> /etc/pgbackrest/pgbackrest.conf
+
+########## Minio S3-compatible bucket repository ##########
+repo2-type=s3
+repo2-s3-endpoint=${URL}
+repo2-s3-bucket=${BUCKET_NAME}
+repo2-s3-key=${ACCESS_KEY}
+repo2-s3-key-secret=${SECRET_KEY}
+repo2-s3-region=${REGION}
+repo2-path=/pgbackrest
+repo2-s3-uri-style=path
+repo2-storage-verify-tls=n
+repo2-retention-full=2
+repo2-block=y
+repo2-bundle=y
+repo2-cipher-pass=6S7bJ8VBfGRbekNUkfIt4wzA8e2oCRdJUpehdPJ1YoOmtDCU5emCiB3/u2ya5FzA
+repo2-cipher-type=aes-256-cbc
+EOF
+```
+
+**pg01-pg02-pg03: ⇒**
+```sh
+export URL="minio01:9000"
+export BUCKET_NAME="postgresql"
+export ACCESS_KEY="OK4csiRFTinOcaOxQZ90"
+export SECRET_KEY="YdNuPFknihjKu2hKgl8BtnBO5Wc8yFZdoaBTv9wR"
+export REGION="us-east-1"
+
+cat <<EOF >> /etc/pgbackrest/pgbackrest.conf
+
+########## OCI S3-compatible bucket repository ##########
+repo2-type=s3
+repo2-s3-endpoint=${URL}
+repo2-s3-bucket=${BUCKET_NAME}
+repo2-s3-key=${ACCESS_KEY}
+repo2-s3-key-secret=${SECRET_KEY}
+repo2-s3-region=${REGION}
+repo2-s3-uri-style=path
+repo2-storage-verify-tls=n
+repo2-path=/pgbackrest
+repo2-retention-full=2
+repo2-block=y
+repo2-bundle=y
+repo2-cipher-pass=6S7bJ8VBfGRbekNUkfIt4wzA8e2oCRdJUpehdPJ1YoOmtDCU5emCiB3/u2ya5FzA
+repo2-cipher-type=aes-256-cbc
+EOF
+```
+
+## Backup
+
 **Create and check stanza**
 
 ```sh
-sudo -u pgbackrest pgbackrest --stanza=pg01 stanza-create
+sudo -u pgbackrest pgbackrest --stanza=demo-cluster-1 stanza-create
 ```
 
 ```
-2024-05-28 12:01:49.728 P00   INFO: stanza-create command begin 2.52: --exec-id=3074-cd42a6a9 --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg1-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg1-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg1-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg1-host-port=8432 --pg1-host-type=tls --pg1-path=/var/lib/pgsql/16/data --pg1-port=5432 --repo1-cipher-pass=<redacted> --repo2-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo2-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --repo2-path=/pgbackrest --repo2-s3-bucket=ocigelibolbucket --repo2-s3-endpoint=https://frkaqewuw7qz.compat.objectstorage.eu-frankfurt-1.oraclecloud.com --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=eu-frankfurt-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=pg01
-2024-05-28 12:01:50.342 P00   INFO: stanza-create for stanza 'pg01' on repo1
-2024-05-28 12:01:50.343 P00   INFO: stanza 'pg01' already exists on repo1 and is valid
-2024-05-28 12:01:50.343 P00   INFO: stanza-create for stanza 'pg01' on repo2
-2024-05-28 12:01:52.200 P00   INFO: stanza-create command end: completed successfully (2474ms)
+2024-05-29 13:41:46.873 P00   INFO: stanza-create command begin 2.52: --exec-id=2755-27db479a --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg2-host=pg02 --pg3-host=pg03 --pg1-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg2-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg3-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg1-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg2-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg3-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg1-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg2-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg3-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg1-host-port=8432 --pg2-host-port=8432 --pg3-host-port=8432 --pg1-host-type=tls --pg2-host-type=tls --pg3-host-type=tls --pg1-path=/var/lib/pgsql/16/data --pg2-path=/var/lib/pgsql/16/data --pg3-path=/var/lib/pgsql/16/data --pg1-port=5432 --pg2-port=5432 --pg3-port=5432 --pg2-socket-path=/var/run/postgresql --pg3-socket-path=/var/run/postgresql --repo1-cipher-pass=<redacted> --repo2-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo2-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --repo2-path=/pgbackrest --repo2-s3-bucket=postgresql --repo2-s3-endpoint=minio01:9000 --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=us-east-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=demo-cluster-1
+2024-05-29 13:41:48.716 P00   INFO: stanza-create for stanza 'demo-cluster-1' on repo1
+2024-05-29 13:41:48.716 P00   INFO: stanza 'demo-cluster-1' already exists on repo1 and is valid
+2024-05-29 13:41:48.716 P00   INFO: stanza-create for stanza 'demo-cluster-1' on repo2
+2024-05-29 13:41:48.735 P00   INFO: stanza-create command end: completed successfully (1864ms)
 ```
 
 ```sh
-sudo -u pgbackrest pgbackrest --stanza=pg01 check
+sudo -u pgbackrest pgbackrest --stanza=demo-cluster-1 check
 ```
 
 ```
-2024-05-28 13:06:14.193 P00   INFO: check command begin 2.52: --exec-id=3950-1dba2b44 --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg1-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg1-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg1-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg1-host-port=8432 --pg1-host-type=tls --pg1-path=/var/lib/pgsql/16/data --pg1-port=5432 --repo1-cipher-pass=<redacted> --repo2-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo2-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --repo2-path=/pgbackrest --repo2-s3-bucket=ocigelibolbucket --repo2-s3-endpoint=https://frkaqewuw7qz.compat.objectstorage.eu-frankfurt-1.oraclecloud.com --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=eu-frankfurt-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=pg01
-2024-05-28 13:06:14.807 P00   INFO: check repo1 configuration (primary)
-2024-05-28 13:06:14.807 P00   INFO: check repo2 configuration (primary)
-2024-05-28 13:06:16.123 P00   INFO: check repo1 archive for WAL (primary)
-2024-05-28 13:06:17.224 P00   INFO: WAL segment 00000001000000000000000F successfully archived to '/backup/pgbackrest/archive/pg01/16-1/0000000100000000/00000001000000000000000F-beeaaf109549c99957d423a5c0e8e4666e734813.gz' on repo1
-2024-05-28 13:06:17.224 P00   INFO: check repo2 archive for WAL (primary)
-2024-05-28 13:06:17.323 P00   INFO: WAL segment 00000001000000000000000F successfully archived to '/pgbackrest/archive/pg01/16-1/0000000100000000/00000001000000000000000F-beeaaf109549c99957d423a5c0e8e4666e734813.gz' on repo2
-2024-05-28 13:06:17.323 P00   INFO: check command end: completed successfully (3132ms)
+2024-05-29 13:42:19.606 P00   INFO: check command begin 2.52: --backup-standby --exec-id=2759-ac69df13 --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg2-host=pg02 --pg3-host=pg03 --pg1-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg2-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg3-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg1-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg2-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg3-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg1-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg2-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg3-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg1-host-port=8432 --pg2-host-port=8432 --pg3-host-port=8432 --pg1-host-type=tls --pg2-host-type=tls --pg3-host-type=tls --pg1-path=/var/lib/pgsql/16/data --pg2-path=/var/lib/pgsql/16/data --pg3-path=/var/lib/pgsql/16/data --pg1-port=5432 --pg2-port=5432 --pg3-port=5432 --pg2-socket-path=/var/run/postgresql --pg3-socket-path=/var/run/postgresql --repo1-cipher-pass=<redacted> --repo2-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo2-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --repo2-path=/pgbackrest --repo2-s3-bucket=postgresql --repo2-s3-endpoint=minio01:9000 --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=us-east-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=demo-cluster-1
+2024-05-29 13:42:21.448 P00   INFO: check repo1 (standby)
+2024-05-29 13:42:21.448 P00   INFO: check repo2 (standby)
+2024-05-29 13:42:21.453 P00   INFO: switch wal not performed because this is a standby
+2024-05-29 13:42:21.453 P00   INFO: check repo1 configuration (primary)
+2024-05-29 13:42:21.453 P00   INFO: check repo2 configuration (primary)
+2024-05-29 13:42:21.656 P00   INFO: check repo1 archive for WAL (primary)
+2024-05-29 13:42:21.757 P00   INFO: WAL segment 00000001000000000000002E successfully archived to '/backup/pgbackrest/archive/demo-cluster-1/16-1/0000000100000000/00000001000000000000002E-7c8aea6fe9534e75b3c32c9a581045ea956b3247.gz' on repo1
+2024-05-29 13:42:21.757 P00   INFO: check repo2 archive for WAL (primary)
+2024-05-29 13:42:21.758 P00   INFO: WAL segment 00000001000000000000002E successfully archived to '/pgbackrest/archive/demo-cluster-1/16-1/0000000100000000/00000001000000000000002E-7c8aea6fe9534e75b3c32c9a581045ea956b3247.gz' on repo2
+2024-05-29 13:42:21.758 P00   INFO: check command end: completed successfully (2154ms)
 ```
 
 **Backup**
 
 ```sh
-sudo -iu pgbackrest pgbackrest --stanza=pg01 --type=full backup
-sudo -iu pgbackrest pgbackrest --stanza=pg01 --type=full backup --repo=1
-sudo -iu pgbackrest pgbackrest --stanza=pg01 --type=full backup --repo=2
+sudo -iu pgbackrest pgbackrest --stanza=demo-cluster-1 --type=full backup
+sudo -iu pgbackrest pgbackrest --stanza=demo-cluster-1 --type=full backup --repo=1
+sudo -iu pgbackrest pgbackrest --stanza=demo-cluster-1 --type=full backup --repo=2
 ```
 
 ```
-2024-05-28 13:06:44.876 P00   INFO: backup command begin 2.52: --compress-type=gz --delta --exec-id=3972-af426f21 --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg1-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg1-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg1-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg1-host-port=8432 --pg1-host-type=tls --pg1-path=/var/lib/pgsql/16/data --pg1-port=5432 --process-max=2 --repo1-block --repo2-block --repo1-bundle --repo2-bundle --repo1-cipher-pass=<redacted> --repo2-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo2-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --repo2-path=/pgbackrest --repo1-retention-full=2 --repo2-retention-full=2 --repo2-s3-bucket=ocigelibolbucket --repo2-s3-endpoint=https://frkaqewuw7qz.compat.objectstorage.eu-frankfurt-1.oraclecloud.com --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=eu-frankfurt-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=pg01 --start-fast --type=full
-2024-05-28 13:06:44.876 P00   INFO: repo option not specified, defaulting to repo1
-2024-05-28 13:06:45.590 P00   INFO: execute non-exclusive backup start: backup begins after the requested immediate checkpoint completes
-2024-05-28 13:06:46.093 P00   INFO: backup start archive = 000000010000000000000011, lsn = 0/11000028
-2024-05-28 13:06:46.093 P00   INFO: check archive for prior segment 000000010000000000000010
-2024-05-28 13:06:48.007 P00   INFO: execute non-exclusive backup stop and wait for all WAL segments to archive
-2024-05-28 13:06:48.207 P00   INFO: backup stop archive = 000000010000000000000011, lsn = 0/11000100
-2024-05-28 13:06:48.209 P00   INFO: check archive for segment(s) 000000010000000000000011:000000010000000000000011
-2024-05-28 13:06:48.818 P00   INFO: new backup label = 20240528-130645F
-2024-05-28 13:06:48.845 P00   INFO: full backup size = 22.1MB, file total = 969
-2024-05-28 13:06:48.845 P00   INFO: backup command end: completed successfully (3972ms)
-2024-05-28 13:06:48.845 P00   INFO: expire command begin 2.52: --exec-id=3972-af426f21 --log-level-console=info --log-level-file=detail --repo1-cipher-pass=<redacted> --repo2-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo2-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --repo2-path=/pgbackrest --repo1-retention-full=2 --repo2-retention-full=2 --repo2-s3-bucket=ocigelibolbucket --repo2-s3-endpoint=https://frkaqewuw7qz.compat.objectstorage.eu-frankfurt-1.oraclecloud.com --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=eu-frankfurt-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=pg01
-2024-05-28 13:06:48.849 P00   INFO: repo1: 16-1 remove archive, start = 000000010000000000000004, stop = 000000010000000000000005
-2024-05-28 13:06:49.967 P00   INFO: expire command end: completed successfully (1122ms)
+2024-05-29 13:42:31.698 P00   INFO: backup command begin 2.52: --backup-standby --delta --exec-id=2762-156ff072 --log-level-console=info --log-level-file=detail --pg1-host=pg01 --pg2-host=pg02 --pg3-host=pg03 --pg1-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg2-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg3-host-ca-file=/etc/pgbackrest/certs/ca.crt --pg1-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg2-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg3-host-cert-file=/etc/pgbackrest/certs/pgbackup01.crt --pg1-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg2-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg3-host-key-file=/etc/pgbackrest/certs/pgbackup01.key --pg1-host-port=8432 --pg2-host-port=8432 --pg3-host-port=8432 --pg1-host-type=tls --pg2-host-type=tls --pg3-host-type=tls --pg1-path=/var/lib/pgsql/16/data --pg2-path=/var/lib/pgsql/16/data --pg3-path=/var/lib/pgsql/16/data --pg1-port=5432 --pg2-port=5432 --pg3-port=5432 --pg2-socket-path=/var/run/postgresql --pg3-socket-path=/var/run/postgresql --process-max=2 --repo1-block --repo2-block --repo1-bundle --repo2-bundle --repo1-cipher-pass=<redacted> --repo2-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo2-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --repo2-path=/pgbackrest --repo1-retention-full=2 --repo2-retention-full=2 --repo2-s3-bucket=postgresql --repo2-s3-endpoint=minio01:9000 --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=us-east-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=demo-cluster-1 --start-fast --type=full
+2024-05-29 13:42:31.698 P00   INFO: repo option not specified, defaulting to repo1
+2024-05-29 13:42:33.639 P00   INFO: execute non-exclusive backup start: backup begins after the requested immediate checkpoint completes
+2024-05-29 13:42:34.141 P00   INFO: backup start archive = 000000010000000000000030, lsn = 0/30000028
+2024-05-29 13:42:34.141 P00   INFO: wait for replay on the standby to reach 0/30000028
+2024-05-29 13:42:34.444 P00   INFO: replay on the standby reached 0/30000028
+2024-05-29 13:42:34.444 P00   INFO: check archive for prior segment 00000001000000000000002F
+2024-05-29 13:42:43.025 P00   INFO: execute non-exclusive backup stop and wait for all WAL segments to archive
+2024-05-29 13:42:43.225 P00   INFO: backup stop archive = 000000010000000000000030, lsn = 0/30000100
+2024-05-29 13:42:43.228 P00   INFO: check archive for segment(s) 000000010000000000000030:000000010000000000000030
+2024-05-29 13:42:43.237 P00   INFO: new backup label = 20240529-134233F
+2024-05-29 13:42:43.274 P00   INFO: full backup size = 355.5MB, file total = 1296
+2024-05-29 13:42:43.275 P00   INFO: backup command end: completed successfully (11579ms)
+2024-05-29 13:42:43.275 P00   INFO: expire command begin 2.52: --exec-id=2762-156ff072 --log-level-console=info --log-level-file=detail --repo1-cipher-pass=<redacted> --repo2-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo2-cipher-type=aes-256-cbc --repo1-path=/backup/pgbackrest --repo2-path=/pgbackrest --repo1-retention-full=2 --repo2-retention-full=2 --repo2-s3-bucket=postgresql --repo2-s3-endpoint=minio01:9000 --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=us-east-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=demo-cluster-1
+2024-05-29 13:42:43.276 P00   INFO: repo1: expire full backup 20240529-122057F
+2024-05-29 13:42:43.278 P00   INFO: repo1: remove expired backup 20240529-122057F
+2024-05-29 13:42:43.279 P00   INFO: repo1: 16-1 remove archive, start = 000000010000000000000008, stop = 000000010000000000000009
+2024-05-29 13:42:43.296 P00   INFO: expire command end: completed successfully (21ms)
 ```
 
 ```sh
@@ -1002,367 +608,298 @@ sudo -iu pgbackrest pgbackrest --repo=2 info
 ```
 
 ```
-stanza: pg01
+stanza: demo-cluster-1
     status: ok
     cipher: aes-256-cbc
 
     db (current)
-        wal archive min/max (16): 00000001000000000000000F/000000010000000000000015
+        wal archive min/max (16): 00000001000000000000002E/000000010000000000000034
 
-        full backup: 20240528-130645F
-            timestamp start/stop: 2024-05-28 13:06:45-04 / 2024-05-28 13:06:48-04
-            wal start/stop: 000000010000000000000011 / 000000010000000000000011
-            database size: 22.1MB, database backup size: 22.1MB
-            repo1: backup size: 3.0MB
+        full backup: 20240529-134233F
+            timestamp start/stop: 2024-05-29 13:42:33-04 / 2024-05-29 13:42:43-04
+            wal start/stop: 000000010000000000000030 / 000000010000000000000030
+            database size: 355.5MB, database backup size: 355.5MB
+            repo1: backup size: 78MB
 
-        full backup: 20240528-130651F
-            timestamp start/stop: 2024-05-28 13:06:51-04 / 2024-05-28 13:06:55-04
-            wal start/stop: 000000010000000000000012 / 000000010000000000000013
-            database size: 22.1MB, database backup size: 22.1MB
-            repo1: backup size: 3.0MB
+        full backup: 20240529-134307F
+            timestamp start/stop: 2024-05-29 13:43:07-04 / 2024-05-29 13:43:16-04
+            wal start/stop: 000000010000000000000032 / 000000010000000000000032
+            database size: 355.5MB, database backup size: 355.5MB
+            repo1: backup size: 78MB
 
-        full backup: 20240528-130658F
-            timestamp start/stop: 2024-05-28 13:06:58-04 / 2024-05-28 13:07:05-04
-            wal start/stop: 000000010000000000000014 / 000000010000000000000015
-            database size: 22.1MB, database backup size: 22.1MB
-            repo2: backup size: 3.0MB
-
-stanza: pg02
-    status: mixed
-        repo1: ok
-        repo2: error (missing stanza path)
-    cipher: aes-256-cbc
-
-    db (current)
-        wal archive min/max (16): 000000010000000000000004/000000010000000000000005
-
-        full backup: 20240528-115637F
-            timestamp start/stop: 2024-05-28 11:56:37-04 / 2024-05-28 11:56:40-04
-            wal start/stop: 000000010000000000000005 / 000000010000000000000005
-            database size: 22.1MB, database backup size: 22.1MB
-            repo1: backup size: 3.0MB
+        full backup: 20240529-134320F
+            timestamp start/stop: 2024-05-29 13:43:20-04 / 2024-05-29 13:43:30-04
+            wal start/stop: 000000010000000000000033 / 000000010000000000000034
+            database size: 355.5MB, database backup size: 355.5MB
+            repo2: backup size: 78MB
 ```
 
-## Restore on Same Host
+## Restore
 
-**pg01: ⇒**
-```sh
-systemctl stop postgresql-16
-sudo find /var/lib/pgsql/16/data -mindepth 1 -delete
-systemctl start postgresql-16
+### Primary
 
-Job for postgresql-16.service failed because the control process exited with error code.
-See "systemctl status postgresql-16.service" and "journalctl -xeu postgresql-16.service" for details.
-```
+Here is our current situation:
 
 ```sh
-sudo -u postgres pgbackrest --stanza=pg01 restore
+sudo -iu postgres patronictl -c /etc/patroni/patroni.yml list
+
++ Cluster: demo-cluster-1 (7374443775163790452) --+-----------+
+| Member | Host        | Role    | State     | TL | Lag in MB |
++--------+-------------+---------+-----------+----+-----------+
+| pg01   | 172.28.5.11 | Leader  | running   |  1 |           |
+| pg02   | 172.28.5.12 | Replica | streaming |  1 |         0 |
+| pg03   | 172.28.5.13 | Replica | streaming |  1 |         0 |
++--------+-------------+---------+-----------+----+-----------+
 ```
 
-```
-2024-05-28 13:15:21.436 P00   INFO: restore command begin 2.52: --exec-id=4466-37a7702d --log-level-console=info --log-level-file=detail --pg1-path=/var/lib/pgsql/16/data --process-max=2 --repo2-cipher-pass=<redacted> --repo2-cipher-type=aes-256-cbc --repo1-host=pgbackup01 --repo1-host-ca-file=/etc/pgbackrest/certs/ca.crt --repo1-host-cert-file=/etc/pgbackrest/certs/pg01.crt --repo1-host-key-file=/etc/pgbackrest/certs/pg01.key --repo1-host-type=tls --repo1-host-user=postgres --repo2-path=/pgbackrest --repo2-s3-bucket=ocigelibolbucket --repo2-s3-endpoint=https://frkaqewuw7qz.compat.objectstorage.eu-frankfurt-1.oraclecloud.com --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=eu-frankfurt-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=pg01
-2024-05-28 13:15:21.450 P00   INFO: repo1: restore backup set 20240528-130651F, recovery will start at 2024-05-28 13:06:51
-2024-05-28 13:15:23.045 P00   INFO: write updated /var/lib/pgsql/16/data/postgresql.auto.conf
-2024-05-28 13:15:23.049 P00   INFO: restore global/pg_control (performed last to ensure aborted restores cannot be started)
-2024-05-28 13:15:23.049 P00   INFO: restore size = 22.1MB, file total = 969
-2024-05-28 13:15:23.049 P00   INFO: restore command end: completed successfully (1616ms)
-```
+Disable auto failover with pause the patroni.
 
 ```sh
-systemctl start postgresql-16
-systemctl status postgresql-16 --no-pager
-
-● postgresql-16.service - PostgreSQL 16 database server
-     Loaded: loaded (/usr/lib/systemd/system/postgresql-16.service; enabled; preset: disabled)
-     Active: active (running) since Mon 2024-05-27 17:17:33 EDT; 30s ago
-       Docs: https://www.postgresql.org/docs/16/static/
-    Process: 1774 ExecStartPre=/usr/pgsql-16/bin/postgresql-16-check-db-dir ${PGDATA} (code=exited, status=0/SUCCESS)
-   Main PID: 1779 (postgres)
-      Tasks: 8 (limit: 22765)
-     Memory: 82.0M
-     CGroup: /docker/c7a3358ce92c21988f3bfd2cc2ddd2a3d0c259437f3703febb1f1b4cfc896a5b/system.slice/postgresql-16.service
-             ├─1779 /usr/pgsql-16/bin/postgres -D /var/lib/pgsql/16/data/
-             ├─1780 "postgres: logger "
-             ├─1781 "postgres: checkpointer "
-             ├─1782 "postgres: background writer "
-             ├─1793 "postgres: walwriter "
-             ├─1794 "postgres: autovacuum launcher "
-             ├─1795 "postgres: archiver last was 00000002.history"
-             └─1796 "postgres: logical replication launcher "
-
-May 27 17:17:32 pgmel34 systemd[1]: Starting PostgreSQL 16 database server...
-May 27 17:17:32 pgmel34 postgres[1779]: 2024-05-27 17:17:32.223 EDT [1779] LOG:  redirecting log output to logging collector process
-May 27 17:17:32 pgmel34 postgres[1779]: 2024-05-27 17:17:32.223 EDT [1779] HINT:  Future log output will appear in directory "log".
-May 27 17:17:33 pgmel34 systemd[1]: Started PostgreSQL 16 database server.
+sudo -iu postgres patronictl -c /etc/patroni/patroni.yml pause
 ```
 
-## Restore on a Different Host
-
-In this scenario, we will test the backup by restoring it to the spare server. My spare server’s pgBackRest conf has the information about the repository host, repository path, repository host user, and required PostgreSQL version installed and access to the repository.
-
-pgBackRest can be used entirely by command line parameters but having a configuration file has more convenience. Below is my spare server pgBackRest configuration file.
-
-**pg03: ⇒**
-```sh
-# update
-sudo dnf update -y
-
-# timezone
-sudo rm -rf /etc/localtime
-sudo ln -s /usr/share/zoneinfo/America/New_York /etc/localtime
-
-# chrony
-sudo dnf install -y chrony
-sudo systemctl enable --now chronyd
-
-# Install the repository RPM:
-sudo dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm
-
-# Disable the built-in PostgreSQL module:
-sudo dnf -qy module disable postgresql
-
-# Install PostgreSQL:
-sudo dnf install -y postgresql16-server postgresql16-contrib
-
-# Install pgBackRest
-sudo dnf install pgbackrest -y
-```
-
-**Create pgBackRest configuration file and directories**
-
-```bash
-sudo mkdir -p -m 770 /var/log/pgbackrest
-sudo chown postgres:postgres /var/log/pgbackrest
-sudo mkdir -p /etc/pgbackrest/conf.d
-sudo touch /etc/pgbackrest/pgbackrest.conf
-sudo chmod 640 /etc/pgbackrest/pgbackrest.conf
-sudo chown -R postgres:postgres /etc/pgbackrest/
-```
-
-**pgBackRest Configuration**
+Stop patroni service on all nodes
 
 ```sh
-cat << EOF | tee "/etc/pgbackrest/pgbackrest.conf"
-[global]
-repo1-host=pgbackupmel01
-repo1-block=y
-repo1-bundle=y
-
-log-level-console=info
-log-level-file=detail
-process-max=2
-compress-type=gz
-start-fast=y
-delta=y
-
-[global:archive-push]  
-compress-level=3
-EOF
+sudo systemctl stop patroni
 ```
 
-**Add below line to repository pgbackrest.conf and restart the pgBackRest service**
+Remove cluster and information of the cluster from the DCS.
 
-**repository:/etc/pgbackrest/pgbackrest.conf ⇒**
-```
-[global]
-...
-tls-server-auth=pgmel38=pgmel34
-```
-
-**repository:
 ```sh
-sudo systemctl restart pgbackrest
-```
-
-**pgmel38:/etc/pgbackrest/pgbackrest.conf ⇒**
-```bash
-[global]
-...
-repo1-host-ca-file=/etc/pgbackrest/cert/ca.crt
-repo1-host-cert-file=/etc/pgbackrest/cert/pg03.crt
-repo1-host-key-file=/etc/pgbackrest/cert/pg03.key
-repo1-host-type=tls
-tls-server-address=*
-tls-server-ca-file=/etc/pgbackrest/cert/ca.crt
-tls-server-cert-file=/etc/pgbackrest/cert/pg03.crt
-tls-server-key-file=/etc/pgbackrest/cert/pg03.key
-#tls-server-auth=pgbackrestservername=stanzaname
-tls-server-auth=pgbackup01=pg01
-```
-
-**pgmel38:/etc/pgbackrest/conf.d/pgmel34.conf ⇒**
-```sh
-cat << EOF | tee "/etc/pgbackrest/conf.d/pg03.conf"
-[pg01]
-pg1-path=/var/lib/pgsql/16/data
-EOF
-chown -R postgres:postgres /etc/pgbackrest/conf.d/
-```
-
-**Create a service file**
-
-**pg03:**
-```sh
-cat << EOF | tee "/etc/systemd/system/pgbackrest.service"
-[Unit]
-Description=pgBackRest Server
-Documentation=https://pgbackrest.org/configuration.html
-After=network.target
-StartLimitIntervalSec=0
-
-[Service]
-Type=simple
-
-User=postgres
-Group=postgres
-
-Restart=always
-RestartSec=1
-
-ExecStart=/usr/bin/pgbackrest server
-ExecReload=kill -HUP $MAINPID
-
-[Install]
-WantedBy=multi-user.target
-EOF
-```
-
-**Start pgBackRest service on all database and repository servers**
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now pgbackrest
-sudo systemctl status pgbackrest --no-pager
-
-sudo -u postgres pgbackrest server-ping
+echo -e 'demo-cluster-1\nYes I am aware' | patronictl remove demo-cluster-1
 ```
 
 **Restore**
 
-**pg03:**
-```
-sudo -u postgres pgbackrest --stanza=pg01 restore
-```
+Stop PostgreSQL database
 
-```
-WARN: --delta or --force specified but unable to find 'PG_VERSION' or 'backup.manifest' in '/var/lib/pgsql/16/data' to confirm that this is a valid $PGDATA directory. --delta and --force have been disabled and if any files exist in the destination directories the restore will be aborted.
-2024-05-27 17:37:11.682 P00   INFO: repo1: restore backup set 20240527-171245F, recovery will start at 2024-05-27 17:12:45
-2024-05-27 17:37:13.158 P00   INFO: write updated /var/lib/pgsql/16/data/postgresql.auto.conf
-2024-05-27 17:37:13.163 P00   INFO: restore global/pg_control (performed last to ensure aborted restores cannot be started)
-2024-05-27 17:37:13.164 P00   INFO: restore size = 22.1MB, file total = 969
-2024-05-27 17:37:13.164 P00   INFO: restore command end: completed successfully (1497ms)
-```
-
-Edit
-
-```
-sudo -u postgres vi /var/lib/pgsql/16/data/postgresql.auto.conf
-
-#archive_command = 'pgbackrest --stanza=pgmel34 archive-push %p'
-archive_command = ''
-```
-
-**Start PostgreSQL service**
-
-**pgmel38:**
+**pg01: ⇒**
 ```sh
-sudo systemctl start postgresql-16
-
-sudo -u postgres psql -c "select 1"
-
- ?column?
-----------
-        1
+sudo -iu postgres /usr/pgsql-16/bin/pg_ctl status
 ```
 
-## Restore Point-in-Time Recovery
+```
+pg_ctl: server is running (PID: 1147)
+/usr/pgsql-16/bin/postgres "-D" "/var/lib/pgsql/16/data" "--config-file=/var/lib/pgsql/16/data/postgresql.conf" "--listen_addresses=0.0.0.0" "--port=5432" "--cluster_name=demo-cluster-1" "--wal_level=replica" "--hot_standby=on" "--max_connections=100" "--max_wal_senders=10" "--max_prepared_transactions=0" "--max_locks_per_transaction=64" "--track_commit_timestamp=off" "--max_replication_slots=10" "--max_worker_processes=8" "--wal_log_hints=on"
+```
 
-**pg01 ⇒ Create a table with very important data**
 ```sh
-sudo -u postgres psql -Atc "select current_timestamp"
-
-sleep 10
-
-sudo -u postgres psql -c "begin; \
-       create table important_table (message text); \
-       insert into important_table values ('Important Data'); \
-       commit; \
-       select * from important_table;"
-
-sleep 10
-
-sudo -u postgres psql -Atc "select current_timestamp"
+sudo -iu postgres /usr/pgsql-16/bin/pg_ctl stop
 ```
 
 ```
-2024-05-28 13:41:54.341001-04
-
-BEGIN
-CREATE TABLE
-INSERT 0 1
-COMMIT
-    message
-----------------
- Important Data
-
-2024-05-28 13:42:14.392062-04
+waiting for server to shut down.... done
+server stopped
 ```
 
-It is important to represent the time as reckoned by PostgreSQL and to include timezone offsets. This reduces the possibility of unintended timezone conversions and an unexpected recovery result.
-
-Now that the time has been recorded the table is dropped. In practice finding the exact time that the table was dropped is a lot harder than in this example. It may not be possible to find the exact time, but some forensic work should be able to get you close.
-
-**pg-primary ⇒ Drop the important table**
 ```sh
-sudo -u postgres psql -c "begin; \
-       drop table important_table; \
-       commit; \
-       select * from important_table;"
-
-sudo -u postgres psql -Atc "select current_timestamp"
-
-2024-05-28 13:43:06.406683-04
+sudo -u postgres pgbackrest --stanza=demo-cluster-1 restore --delta
 ```
 
-If the wrong backup is selected for restore then recovery to the required time target will fail. To demonstrate this a new incremental backup is performed where important_table does not exist.
+```
+2024-05-29 14:04:33.358 P00   INFO: restore command begin 2.52: --delta --exec-id=12581-f8ce186b --log-level-console=info --log-level-file=detail --pg1-path=/var/lib/pgsql/16/data --process-max=2 --repo2-cipher-pass=<redacted> --repo2-cipher-type=aes-256-cbc --repo1-host=pgbackup01 --repo1-host-ca-file=/etc/pgbackrest/certs/ca.crt --repo1-host-cert-file=/etc/pgbackrest/certs/pg01.crt --repo1-host-key-file=/etc/pgbackrest/certs/pg01.key --repo1-host-type=tls --repo1-host-user=postgres --repo2-path=/pgbackrest --repo2-s3-bucket=postgresql --repo2-s3-endpoint=minio01:9000 --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=us-east-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=demo-cluster-1
+2024-05-29 14:04:33.374 P00   INFO: repo1: restore backup set 20240529-134307F, recovery will start at 2024-05-29 13:43:07
+2024-05-29 14:04:33.375 P00   INFO: remove invalid files/links/paths from '/var/lib/pgsql/16/data'
+2024-05-29 14:04:34.624 P00   INFO: write updated /var/lib/pgsql/16/data/postgresql.auto.conf
+2024-05-29 14:04:34.629 P00   INFO: restore global/pg_control (performed last to ensure aborted restores cannot be started)
+2024-05-29 14:04:34.629 P00   INFO: restore size = 355.5MB, file total = 1296
+2024-05-29 14:04:34.629 P00   INFO: restore command end: completed successfully (1273ms)
+```
 
-**pg-primary ⇒ Restore the demo cluster to 2024-05-28 13:42:14.392062-04**
+Start PostgreSQL database
+
 ```sh
-sudo systemctl stop postgresql-16
-
-sudo -u postgres pgbackrest --stanza=pg01 --delta \
-       --type=time "--target=2024-05-28 13:42:14.392062-04" \
-       --target-action=promote restore
+sudo -iu postgres /usr/pgsql-16/bin/pg_ctl start
 ```
 
-**pg-primary ⇒ Start PostgreSQL and check that the important table exists**
-```sh
-sudo systemctl start postgresql-16
-sudo systemctl status pgbackrest --no-pager
-
-sleep 30
-
-sudo -u postgres psql -c "select * from important_table"
-```
-
-```
-    message
-----------------
- Important Data
-```
-
-## Schedule a Backup
+Check data
 
 ```bash
-#m h   dom mon dow   command
-30 06  *   *   0     pgbackrest --type=full --stanza=pg01 backup
-30 06  *   *   1-6   pgbackrest --type=diff --stanza=pg01 backup
+sudo -iu postgres psql -d employees -c " \
+SELECT d.dept_name, AVG(s.amount) AS average_salary \
+FROM employees.salary s \
+JOIN employees.department_employee de ON s.employee_id = de.employee_id \
+JOIN employees.department d ON de.department_id = d.id \
+WHERE s.to_date > CURRENT_DATE AND de.to_date > CURRENT_DATE \
+GROUP BY d.dept_name \
+ORDER BY average_salary DESC \
+LIMIT 5; \
+"
+```
+
+```
+ dept_name  |   average_salary
+------------+--------------------
+ Sales      | 88852.969470305827
+ Marketing  | 80058.848807438351
+ Finance    | 78559.936962289941
+ Research   | 67913.374975714008
+ Production | 67843.301984841663
+```
+
+Start patroni service on all nodes
+
+```sh
+sudo systemctl start patroni
+sleep 5
+sudo -u postgres patronictl -c /etc/patroni/patroni.yml list
+```
+
+```
++ Cluster: demo-cluster-1 (7374443775163790452) -----------+
+| Member | Host        | Role   | State   | TL | Lag in MB |
++--------+-------------+--------+---------+----+-----------+
+| pg01   | 172.28.5.11 | Leader | running |  2 |           |
++--------+-------------+--------+---------+----+-----------+
+```
+
+After a while
+
+```
++ Cluster: demo-cluster-1 (7374443775163790452) +-----------+
+| Member | Host        | Role    | State   | TL | Lag in MB |
++--------+-------------+---------+---------+----+-----------+
+| pg01   | 172.28.5.11 | Leader  | running |  2 |           |
+| pg02   | 172.28.5.12 | Replica | running |  1 |         0 |
+| pg03   | 172.28.5.13 | Replica | running |  1 |         0 |
++--------+-------------+---------+---------+----+-----------+
+```
+
+Re-init
+
+```sh
+sudo -u postgres patronictl -c /etc/patroni/patroni.yml reinit demo-cluster-1 pg02
+sudo -u postgres patronictl -c /etc/patroni/patroni.yml reinit demo-cluster-1 pg03
+sleep 5
+sudo -u postgres patronictl -c /etc/patroni/patroni.yml list
+```
+
+```
++ Cluster: demo-cluster-1 (7374443775163790452) --+-----------+
+| Member | Host        | Role    | State     | TL | Lag in MB |
++--------+-------------+---------+-----------+----+-----------+
+| pg01   | 172.28.5.11 | Leader  | running   |  2 |           |
+| pg02   | 172.28.5.12 | Replica | streaming |  2 |         0 |
+| pg03   | 172.28.5.13 | Replica | streaming |  2 |         0 |
++--------+-------------+---------+-----------+----+-----------+
+```
+
+>[!caution]
+>Do not forget to take a new full backup
+
+### Create a replica using pgBackRest
+
+Let’s edit the bootstrap configuration part:
+
+```sh
+sudo -iu postgres patronictl -c /etc/patroni/patroni.yml edit-config
+
+## adjust the following lines
+postgresql:
+  parameters:
+    recovery_target_timeline: latest
+    restore_command: pgbackrest --stanza=demo-cluster-1 archive-get %f "%p"
+
+sudo -iu postgres patronictl -c /etc/patroni/patroni.yml reload demo-cluster-1
+```
+
+Postgresql 15 and below
+
+```
+postgresql:
+  recovery_conf:
+    recovery_target_timeline: latest
+    restore_command: pgbackrest --stanza=demo-cluster-1 archive-get %f "%p"
+```
+
+On all your nodes, in `/etc/patroni/patroni.yml`, find the following part:
+
+```sh
+sudo -iu postgres vi /etc/patroni/patroni.yml
+```
+
+```sh
+## adjust the following lines
+postgresql:
+...
+  create_replica_methods:
+    - pgbackrest
+    - basebackup
+  pgbackrest:
+    command: pgbackrest --stanza=demo-cluster-1 restore --type=none
+    keep_data: True
+    no_params: True
+  basebackup:
+    checkpoint: 'fast'
+```
+
+Don’t forget to reload the configuration:
+
+```sh
+sudo systemctl reload patroni
+```
+
+Here is our current situation:
+
+```sh
+sudo -iu postgres patronictl -c /etc/patroni/patroni.yml list
+
++ Cluster: demo-cluster-1 (7373708270390346493) ---+-----------+
+| Member  | Host        | Role    | State     | TL | Lag in MB |
++---------+-------------+---------+-----------+----+-----------+
+| pgmel01 | 172.28.5.11 | Leader  | running   |  1 |           |
+| pgmel02 | 172.28.5.12 | Replica | streaming |  1 |         0 |
+| pgmel03 | 172.28.5.13 | Replica | streaming |  1 |         0 |
++---------+-------------+---------+-----------+----+-----------+
+```
+
+We already have 2 running replicas. So we’ll need to stop Patroni on one node and remove its data directory to trigger a new replica creation:
+
+**pg03: ⇒**
+```sh
+sudo systemctl stop patroni
+sudo find /var/lib/pgsql/16/data -mindepth 1 -delete
+sudo systemctl start patroni
+sudo journalctl -u patroni.service -f -n 100
+```
+
+```
+May 29 14:38:50 pg03 systemd[1]: Stopping Runners to orchestrate a high-availability PostgreSQL...
+May 29 14:38:50 pg03 systemd[1]: patroni.service: Deactivated successfully.
+May 29 14:38:50 pg03 systemd[1]: Stopped Runners to orchestrate a high-availability PostgreSQL.
+May 29 14:38:50 pg03 systemd[1]: Started Runners to orchestrate a high-availability PostgreSQL.
+May 29 14:38:50 pg03 patroni[35591]: 2024-05-29 14:38:50.925 P00   INFO: restore command begin 2.52: --exec-id=35591-d560e758 --log-level-console=info --log-level-file=detail --pg1-path=/var/lib/pgsql/16/data --process-max=2 --repo2
+-cipher-pass=<redacted> --repo2-cipher-type=aes-256-cbc --repo1-host=pgbackup01 --repo1-host-ca-file=/etc/pgbackrest/certs/ca.crt --repo1-host-cert-file=/etc/pgbackrest/certs/pg03.crt --repo1-host-key-file=/etc/pgbackrest/certs/pg03
+.key --repo1-host-type=tls --repo1-host-user=postgres --repo2-path=/pgbackrest --repo2-s3-bucket=postgresql --repo2-s3-endpoint=minio01:9000 --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=us-east-1 --re
+po2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=demo-cluster-1 --type=none
+May 29 14:38:50 pg03 patroni[35591]: 2024-05-29 14:38:50.942 P00   INFO: repo1: restore backup set 20240529-143757F_20240529-143829I, recovery will start at 2024-05-29 14:38:29
+May 29 14:38:53 pg03 patroni[35591]: 2024-05-29 14:38:53.432 P00   INFO: write updated /var/lib/pgsql/16/data/postgresql.auto.conf
+May 29 14:38:53 pg03 patroni[35591]: 2024-05-29 14:38:53.438 P00   INFO: restore global/pg_control (performed last to ensure aborted restores cannot be started)
+May 29 14:38:53 pg03 patroni[35591]: 2024-05-29 14:38:53.439 P00   INFO: restore size = 355.5MB, file total = 1296
+May 29 14:38:53 pg03 patroni[35591]: 2024-05-29 14:38:53.439 P00   INFO: restore command end: completed successfully (2516ms)
+May 29 14:38:53 pg03 patroni[35599]: 2024-05-29 14:38:53.743 EDT [35599] LOG:  redirecting log output to logging collector process
+May 29 14:38:53 pg03 patroni[35599]: 2024-05-29 14:38:53.743 EDT [35599] HINT:  Future log output will appear in directory "log".
+May 29 14:38:53 pg03 patroni[35604]: localhost:5432 - rejecting connections
+May 29 14:38:53 pg03 patroni[35606]: localhost:5432 - rejecting connections
+May 29 14:38:54 pg03 patroni[35613]: localhost:5432 - accepting connections
+```
+
+As we can see from the logs above, the replica has successfully been created using pgBackRest:
+
+```sh
+sudo -iu postgres patronictl -c /etc/patroni/patroni.yml list
+
++ Cluster: demo-cluster-1 (7373708270390346493) ---+-----------+
+| Member  | Host        | Role    | State     | TL | Lag in MB |
++---------+-------------+---------+-----------+----+-----------+
+| pgmel01 | 172.28.5.11 | Leader  | running   |  1 |           |
+| pgmel02 | 172.28.5.12 | Replica | streaming |  1 |         0 |
+| pgmel03 | 172.28.5.13 | Replica | streaming |  1 |         0 |
++---------+-------------+---------+-----------+----+-----------+
 ```
 
 ## References:
 
-- [pgBackRest File Bundling and Block Incremental... | Crunchy Data Blog](https://www.crunchydata.com/blog/pgbackrest-file-bundling-and-block-incremental-backup)
-- [EDB Docs - Use Case 1: Running pgBackRest Locally on the Database Host (enterprisedb.com)](https://www.enterprisedb.com/docs/supported-open-source/pgbackrest/06-use_case_1/)
-- [pgBackRest User Guide - Setup Passwordless SSH](https://pgbackrest.org/user-guide.html#repo-host/setup-ssh)
-- [EDB Docs - Use Case 2: Running pgBackRest from a Dedicated Repository Host (enterprisedb.com)](https://www.enterprisedb.com/docs/supported-open-source/pgbackrest/07-use_case_2/)
-- [Decoupling Backup and Expiry Operations in PostgreSQL With pgBackRest (percona.com)](https://www.percona.com/blog/decoupling-backup-and-expiry-operations-in-postgresql-with-pgbackrest/)
+- [Patroni and pgBackRest combined | pgstef’s blog](https://pgstef.github.io/2022/07/12/patroni_and_pgbackrest_combined.html)
+- [pgBackRest setup - Percona Distribution for PostgreSQL](https://docs.percona.com/postgresql/16/solutions/pgbackrest.html)
