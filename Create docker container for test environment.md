@@ -1,31 +1,19 @@
 ---
 database: PostgreSQL
-title: High Availability
-class: patroni
-created: 05/12/2024 16:10 GMT-04:00
+title: Backup and Recovery
+class: pgBackRest
+created: 03/26/2024 12:33 GMT-04:00
 ---
-[[Create docker container for test environment#MySelf#EtcD]]
-[[Create docker container for test environment#MySelf#PostgreSQL]]
-[[Create docker container for test environment#MySelf#HaProxy]]
+## Minio
 
-![[Pasted image 20240514113157.png]]
+### Install Minio
 
-## Environment
-
-| **Hostname** | **IP Address** | **Applications**              |
-| ------------ | -------------- | ----------------------------- |
-| pg01         | 172.28.5.11    | postgresql 16 / patroni 3.3.0 |
-| pg02         | 172.28.5.12    | postgresql 16 / patroni 3.3.0 |
-| pg03         | 172.28.5.13    | postgresql 16 / patroni 3.3.0 |
-| etcd01       | 172.28.5.16    | etcd 3.5                      |
-| etcd02       | 172.28.5.17    | etcd 3.5                      |
-| etcd03       | 172.28.5.18    | etcd 3.5                      |
-| haproxy01    | 172.28.5.19    | HAProxy 2.4                   |
-## EtcD
-
-**Prepare**
+- [[Create docker container for test environment#MySelf#Minio]]
+- [MinIO Object Storage for Linux — MinIO Object Storage for Linux](https://min.io/docs/minio/linux/index.html#quickstart-minio-for-linux)
 
 ```sh
+dnf install -y sudo
+
 # update
 sudo dnf update -y
 
@@ -37,497 +25,322 @@ sudo ln -s /usr/share/zoneinfo/America/New_York /etc/localtime
 sudo dnf install -y chrony
 sudo systemctl enable --now chronyd
 
-# extras
-sudo dnf install -y bind-utils hostname iproute procps
+sudo dnf -y install https://dl.min.io/server/minio/release/linux-amd64/minio.rpm
+
+minio -v
 ```
 
-**Installation**
-
-PostgreSQL 16 repository on Red Hat Family 9 : https://www.postgresql.org/download/linux/redhat/
-
-```sh
-sudo dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm
-sudo dnf --enablerepo=pgdg-rhel9-extras install -y etcd
 ```
-
-**Check**
-
-```sh
-etcd version
-etcdctl version
-```
-
-To fetch it dynamically, you can use this simple shell script, where etcdmel01 etcdmel02 etcdmel03 are the three etcd hosts:
-
-```sh
-# Fetch the IP addresses of all etcd hosts
-etcd_nodes=( etcd01 etcd02 etcd03 )
-i=0
-for node in "${etcd_nodes[@]}"
-do
-  i=$i+1
-  target_ip=$(dig +short $node)
-  target_array[$i]="$node=http://$target_ip:2380"
-done
-ETCD_CLUSTER_URL=$(printf ",%s" "${target_array[@]}")
-export ETCD_CLUSTER_URL=${ETCD_CLUSTER_URL:1}
-echo "ETCD_CLUSTER_URL=\"$ETCD_CLUSTER_URL\""
-```
-
-Then, set up the local etcd configuration and start the service:
-
->[!note]
->execute all nodes same time
-
-```sh
-MY_IP=$(hostname -I | awk ' {print $1}')
-MY_NAME=$(hostname --short)
-cat <<EOF | sudo tee /etc/etcd/etcd.conf
-#[Member]
-ETCD_LISTEN_PEER_URLS="http://$MY_IP:2380"
-ETCD_LISTEN_CLIENT_URLS="http://127.0.0.1:2379,http://$MY_IP:2379"
-ETCD_NAME="$MY_NAME"
-#[Clustering]
-ETCD_INITIAL_ADVERTISE_PEER_URLS="http://$MY_IP:2380"
-ETCD_INITIAL_CLUSTER="$ETCD_CLUSTER_URL"
-ETCD_ADVERTISE_CLIENT_URLS="http://$MY_IP:2379"
-ETCD_INITIAL_CLUSTER_TOKEN="etcd-cluster-1"
-ETCD_INITIAL_CLUSTER_STATE="new"
-#[Tune]
-ETCD_ELECTION_TIMEOUT="5000"
-ETCD_HEARTBEAT_INTERVAL="1000"
-ETCD_INITIAL_ELECTION_TICK_ADVANCE="false"
-ETCD_AUTO_COMPACTION_RETENTION="1"
-#[Data]
-#ETCD_DATA_DIR="{{ etcd_data_dir }}"
-EOF
-sudo systemctl enable --now etcd.service
-sudo systemctl status etcd.service --no-pager
-```
-
-**Check**
-
-```sh
-journalctl -u etcd -f
+minio version RELEASE.2024-05-28T17-19-04Z (commit-id=f79a4ef4d0dc3e6562cad0d1d1db674bc8c75531)
+Runtime: go1.22.3 linux/amd64
+License: GNU AGPLv3 - https://www.gnu.org/licenses/agpl-3.0.html
+Copyright: 2015-2024 MinIO, Inc.
 ```
 
 ```sh
-etcd_nodes=( etcd01 etcd02 etcd03 )
-i=0
-for node in "${etcd_nodes[@]}"
-do
-  i=$i+1
-  target_ip=$(dig +short $node)
-  target_array[$i]="$target_ip:2379"
-done
-ETCD_CLUSTER_URL=$(printf ",%s" "${target_array[@]}")
-export ENDPOINTS=${ETCD_CLUSTER_URL:1}
+groupadd -r minio-user
+useradd -M -r -g minio-user minio-user
 
-etcdctl member list --write-out=table --endpoints=$ENDPOINTS
+mkdir /minio-data
+chown minio-user:minio-user /minio-data/
+```
 
-etcdctl endpoint status --write-out=table --endpoints=$ENDPOINTS
+**Https**
 
-etcdctl endpoint health --write-out=table --endpoints=$ENDPOINTS
+```bash
+sudo mkdir -p /opt/minio/certs
+```
+
+```bash
+sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+-keyout /opt/minio/certs/private.key \
+-out /opt/minio/certs/public.crt \
+-subj "/C=BE/ST=Country/L=City/O=Organization/CN=minio1"
+
+sudo chown -R minio-user:minio-user /opt/minio
+
+sudo vi /usr/lib/systemd/system/minio.service
 ```
 
 ```
-+------------------+---------+-----------+-------------------------+-------------------------+------------+
-|        ID        | STATUS  |   NAME    |       PEER ADDRS        |      CLIENT ADDRS       | IS LEARNER |
-+------------------+---------+-----------+-------------------------+-------------------------+------------+
-|  3a925a774311aaf | started | etcdmta01 | http://172.28.5.16:2380 | http://172.28.5.16:2379 |      false |
-| 3b54c768268e90bf | started | etcdmta03 | http://172.28.5.18:2380 | http://172.28.5.18:2379 |      false |
-| 9bbf1d1a71c1f6f1 | started | etcdmta02 | http://172.28.5.17:2380 | http://172.28.5.17:2379 |      false |
-+------------------+---------+-----------+-------------------------+-------------------------+------------+
-+------------------+------------------+---------+---------+-----------+------------+-----------+------------+--------------------+--------+
-|     ENDPOINT     |        ID        | VERSION | DB SIZE | IS LEADER | IS LEARNER | RAFT TERM | RAFT INDEX | RAFT APPLIED INDEX | ERRORS |
-+------------------+------------------+---------+---------+-----------+------------+-----------+------------+--------------------+--------+
-| 172.28.5.16:2379 |  3a925a774311aaf |  3.5.13 |   20 kB |     false |      false |         3 |         17 |                 17 |        |
-| 172.28.5.17:2379 | 9bbf1d1a71c1f6f1 |  3.5.13 |   20 kB |      true |      false |         3 |         17 |                 17 |        |
-| 172.28.5.18:2379 | 3b54c768268e90bf |  3.5.13 |   20 kB |     false |      false |         3 |         17 |                 17 |        |
-+------------------+------------------+---------+---------+-----------+------------+-----------+------------+--------------------+--------+
-+------------------+--------+------------+-------+
-|     ENDPOINT     | HEALTH |    TOOK    | ERROR |
-+------------------+--------+------------+-------+
-| 172.28.5.17:2379 |   true | 1.713569ms |       |
-| 172.28.5.16:2379 |   true |  1.76719ms |       |
-| 172.28.5.18:2379 |   true | 3.104073ms |       |
-+------------------+--------+------------+-------+
+ExecStart=/usr/local/bin/minio server $MINIO_OPTS $MINIO_VOLUMES
+To
+ExecStart=/usr/local/bin/minio server --certs-dir /opt/minio/certs $MINIO_OPTS $MINIO_VOLUMES
 ```
-
-## PostgreSQL + Patroni
-
-### Prepare
 
 ```sh
-# update
-sudo dnf update -y
-
-# timezone
-sudo rm -rf /etc/localtime
-sudo ln -s /usr/share/zoneinfo/America/New_York /etc/localtime
-
-# chrony
-sudo dnf install -y chrony
-sudo systemctl enable --now chronyd
-
-# extras
-sudo dnf install -y bind-utils hostname iproute procps procps
+vi /etc/default/minio
 ```
 
-### Install PostgreSQL
+```
+MINIO_OPTS="--console-address :9001"
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin
+MINIO_VOLUMES="/minio-data/"
+MINIO_ACCESS_KEY="/opt/minio/certs/public.crt"
+MINIO_SECRET_KEY="/opt/minio/certs/private.key"
+```
+
+```sh
+systemctl daemon-reload
+systemctl enable --now minio
+systemctl status minio --no-pager
+```
+
+### Install Minio client mc
+
+[MinIO Client — MinIO Object Storage for Linux](https://min.io/docs/minio/linux/reference/minio-mc.html#install-mc)
+
+```sh
+curl https://dl.min.io/client/mc/release/linux-amd64/mc \
+  --create-dirs \
+  -o $HOME/minio-binaries/mc
+
+chmod +x $HOME/minio-binaries/mc
+export PATH=$PATH:$HOME/minio-binaries/
+
+mc -v
+```
+
+```
+mc version RELEASE.2024-05-24T09-08-49Z (commit-id=a8fdcbe7cb2f85ce98d60e904717aa00016a7d37)
+Runtime: go1.22.3 linux/amd64
+Copyright (c) 2015-2024 MinIO, Inc.
+License GNU AGPLv3 <https://www.gnu.org/licenses/agpl-3.0.html>
+```
+
+**Create an Alias for the S3-Compatible Service**
+
+Minio Server
+
+```sh
+bash +o history
+mc alias set ALIAS HOSTNAME ACCESS_KEY SECRET_KEY
+mc --insecure alias set myminio https://minio01:9000 minioadmin minioadmin
+bash -o history
+```
+
+**Test the Connection**
+
+```sh
+mc --insecure admin info myminio
+```
+
+```
+●  minio01:9000
+   Uptime: 4 minutes
+   Version: 2024-05-28T17:19:04Z
+   Network: 1/1 OK
+   Drives: 1/1 OK
+   Pool: 1
+
+┌──────┬────────────────────────┬─────────────────────┬──────────────┐
+│ Pool │ Drives Usage           │ Erasure stripe size │ Erasure sets │
+│ 1st  │ 34.1% (total: 300 GiB) │ 1                   │ 1            │
+└──────┴────────────────────────┴─────────────────────┴──────────────┘
+
+1 drive online, 0 drives offline, EC:0
+```
+
+Create Access Key
+
+```sh
+mc --insecure admin user add myminio oracle o8si58uHgMyJsDEUFYQhEH3JYgJVnrgiIc6W6zQ5
+
+mc --insecure admin user svcacct add myminio oracle \
+   --access-key "1SQXwhMuV6xBhsVbWqWX" \
+   --secret-key "o8si58uHgMyJsDEUFYQhEH3JYgJVnrgiIc6W6zQ5"
+
+
+
+mc --insecure admin user add myminio 1SQXwhMuV6xBhsVbWqWX o8si58uHgMyJsDEUFYQhEH3JYgJVnrgiIc6W6zQ5
+```
+
+Create bucket
+
+```sh
+mc --insecure mb myminio/oracle --region us-east-1
+mc --insecure ls myminio
+```
+
+## Create access key
+
+Left Menu -> User -> Access Keys -> Create access key
+
+![[Pasted image 20240327084758.png]]
+
+![[Pasted image 20240327084835.png]]
+
+Access Key: OK4csiRFTinOcaOxQZ90
+Secret Key: YdNuPFknihjKu2hKgl8BtnBO5Wc8yFZdoaBTv9wR
+
+## Set region
+
+Left Menu -> Configuration -> Region
+
+![[Pasted image 20240327085241.png]]
+
+## Restart Service
+
+```bash
+sudo systemctl restart minio
+```
+
+## Create Bucket
+
+Left Menu -> Administrator -> Buckets -> Create Bucket
+
+![[Pasted image 20240327085813.png]]
+
+![[Pasted image 20240327090221.png]]
+
+## pgBackRest Configuration
+
+[[pgBackRest 2.5x Backup on Same Host and on Dedicated Repository Host]]
+
+```bash
+sudo -u postgres vi /etc/pgbackrest/pgbackrest.conf
+```
+
+```bash
+[demo]
+# PostgreSQL cluster data directory
+pg1-path=/var/lib/pgsql/16/data
+
+[global]
+repo1-block=y
+repo1-bundle=y
+# pgBackRest repository encryption
+repo1-cipher-pass=6QX2MWzybOtpHatVxaMUCRXUMa7oQYoLX0lZfPGLdRP+zFQmWyu5jjoRVhxtXgNZ
+repo1-cipher-type=aes-256-cbc
+# pgBackRest repository
+repo1-path=/var/lib/pgbackrest
+# Configure retention to 2 full backups
+repo1-retention-full=2
+# log level
+log-level-console=info
+log-level-file=detail
+# Configure backup fast start
+start-fast=y
+
+# S3-Compatible Object Store - Minio
+repo2-type=s3
+repo2-path=/demo-repo
+repo2-retention-full=3
+repo2-s3-bucket=pgbackrest-pg01
+repo2-s3-endpoint=minio:9000
+repo2-s3-key=ytpOQ9MQkJAkwdNyH4jY
+repo2-s3-key-secret=Ebpyc3hWU9oU2wByO3xnobrLqLkeOxqxD6SfMWy2
+repo2-s3-region=us-east-1
+# minio path fix
+repo2-s3-uri-style=path
+# it is seflsigned certifacte
+repo2-storage-verify-tls=n
+
+# File compression level for archive-push
+[global:archive-push]
+compress-level=3
+```
+
+## Create stanza
+
+```bash
+sudo -u postgres pgbackrest --stanza=demo stanza-create
+```
+
+```sh
+2024-03-27 15:52:48.163 P00   INFO: stanza-create command begin 2.50: --exec-id=38735-89a06e62 --log-level-console=info --log-level-file=detail --pg1-path=/var/lib/pgsql/16/data --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/var/lib/pgbackrest --repo2-path=/demo-repo --repo2-s3-bucket=pgbackrest-pg01 --repo2-s3-endpoint=minio:9000 --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=us-east-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=demo
+2024-03-27 15:52:48.767 P00   INFO: stanza-create for stanza 'demo' on repo1
+2024-03-27 15:52:48.768 P00   INFO: stanza 'demo' already exists on repo1 and is valid
+2024-03-27 15:52:48.768 P00   INFO: stanza-create for stanza 'demo' on repo2
+2024-03-27 15:52:48.787 P00   INFO: stanza-create command end: completed successfully (626ms)
+```
+
+![[Pasted image 20240327115436.png]]
+
+## Backup
+
+```bash
+sudo -u postgres pgbackrest --stanza=demo --repo=2 backup
+```
+
+```sh
+2024-03-27 16:06:01.406 P00   INFO: backup command begin 2.50: --exec-id=39093-b5d0177b --log-level-console=info --log-level-file=detail --pg1-path=/var/lib/pgsql/16/data --repo=2 --repo1-block --repo1-bundle --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/var/lib/pgbackrest --repo2-path=/demo-repo --repo1-retention-full=2 --repo2-retention-full=3 --repo2-s3-bucket=pgbackrest-pg01 --repo2-s3-endpoint=minio:9000 --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=us-east-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=demo --start-fast
+WARN: no prior backup exists, incr backup has been changed to full
+2024-03-27 16:06:02.118 P00   INFO: execute non-exclusive backup start: backup begins after the requested immediate checkpoint completes
+2024-03-27 16:06:02.619 P00   INFO: backup start archive = 00000004000000000000003A, lsn = 0/3A000028
+2024-03-27 16:06:02.619 P00   INFO: check archive for prior segment 000000040000000000000039
+2024-03-27 16:06:20.557 P00   INFO: execute non-exclusive backup stop and wait for all WAL segments to archive
+2024-03-27 16:06:20.757 P00   INFO: backup stop archive = 00000004000000000000003A, lsn = 0/3A000138
+2024-03-27 16:06:20.760 P00   INFO: check archive for segment(s) 00000004000000000000003A:00000004000000000000003A
+2024-03-27 16:06:20.773 P00   INFO: new backup label = 20240327-160602F
+2024-03-27 16:06:20.815 P00   INFO: full backup size = 359.1MB, file total = 1292
+2024-03-27 16:06:20.815 P00   INFO: backup command end: completed successfully (19411ms)
+2024-03-27 16:06:20.816 P00   INFO: expire command begin 2.50: --exec-id=39093-b5d0177b --log-level-console=info --log-level-file=detail --repo=2 --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/var/lib/pgbackrest --repo2-path=/demo-repo --repo1-retention-full=2 --repo2-retention-full=3 --repo2-s3-bucket=pgbackrest-pg01 --repo2-s3-endpoint=minio:9000 --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=us-east-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=demo
+2024-03-27 16:06:20.823 P00   INFO: expire command end: completed successfully (8ms)
+```
+
+
+```bash
+sudo -u postgres pgbackrest --stanza=demo --repo=2 backup
+
+2024-03-27 16:09:17.096 P00   INFO: backup command begin 2.50: --exec-id=39186-0c4bf9e7 --log-level-console=info --log-level-file=detail --pg1-path=/var/lib/pgsql/16/data --repo=2 --repo1-block --repo1-bundle --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/var/lib/pgbackrest --repo2-path=/demo-repo --repo1-retention-full=2 --repo2-retention-full=3 --repo2-s3-bucket=pgbackrest-pg01 --repo2-s3-endpoint=minio:9000 --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=us-east-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=demo --start-fast
+2024-03-27 16:09:17.815 P00   INFO: last backup label = 20240327-160602F, version = 2.50
+2024-03-27 16:09:17.815 P00   INFO: execute non-exclusive backup start: backup begins after the requested immediate checkpoint completes
+2024-03-27 16:09:18.316 P00   INFO: backup start archive = 00000004000000000000003C, lsn = 0/3C000028
+2024-03-27 16:09:18.316 P00   INFO: check archive for prior segment 00000004000000000000003B
+2024-03-27 16:09:19.539 P00   INFO: execute non-exclusive backup stop and wait for all WAL segments to archive
+2024-03-27 16:09:19.739 P00   INFO: backup stop archive = 00000004000000000000003C, lsn = 0/3C000100
+2024-03-27 16:09:19.742 P00   INFO: check archive for segment(s) 00000004000000000000003C:00000004000000000000003C
+2024-03-27 16:09:19.756 P00   INFO: new backup label = 20240327-160602F_20240327-160917I
+2024-03-27 16:09:19.799 P00   INFO: incr backup size = 2.7MB, file total = 1292
+2024-03-27 16:09:19.799 P00   INFO: backup command end: completed successfully (2705ms)
+2024-03-27 16:09:19.800 P00   INFO: expire command begin 2.50: --exec-id=39186-0c4bf9e7 --log-level-console=info --log-level-file=detail --repo=2 --repo1-cipher-pass=<redacted> --repo1-cipher-type=aes-256-cbc --repo1-path=/var/lib/pgbackrest --repo2-path=/demo-repo --repo1-retention-full=2 --repo2-retention-full=3 --repo2-s3-bucket=pgbackrest-pg01 --repo2-s3-endpoint=minio:9000 --repo2-s3-key=<redacted> --repo2-s3-key-secret=<redacted> --repo2-s3-region=us-east-1 --repo2-s3-uri-style=path --no-repo2-storage-verify-tls --repo2-type=s3 --stanza=demo
+2024-03-27 16:09:19.807 P00   INFO: expire command end: completed successfully (8ms)
+```
+
+```bash
+sudo -u postgres pgbackrest --stanza=demo --repo=2 info
+
+stanza: demo
+    status: ok
+    cipher: none
+
+    db (current)
+        wal archive min/max (16): 000000040000000000000037/00000004000000000000003C
+
+        full backup: 20240327-160602F
+            timestamp start/stop: 2024-03-27 16:06:02+00 / 2024-03-27 16:06:20+00
+            wal start/stop: 00000004000000000000003A / 00000004000000000000003A
+            database size: 359.1MB, database backup size: 359.1MB
+            repo2: backup set size: 77.9MB, backup size: 77.9MB
+
+        incr backup: 20240327-160602F_20240327-160917I
+            timestamp start/stop: 2024-03-27 16:09:17+00 / 2024-03-27 16:09:19+00
+            wal start/stop: 00000004000000000000003C / 00000004000000000000003C
+            database size: 359.1MB, database backup size: 2.7MB
+            repo2: backup set size: 77.9MB, backup size: 160.4KB
+            backup reference list: 20240327-160602F
+```
+
+## Restore
+
+### on same PostgreSQL server
+
+asd
+
+### on different PostgreSQL server
 
 [[PostgreSQL 16 Installation on Red Hat Family 9]]
 
-```sh
-sudo dnf install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm
-sudo dnf -qy module disable postgresql
-sudo dnf install -y postgresql16-server postgresql16-contrib
-```
 
-### Install Patroni
 
-```sh
-sudo dnf install epel-release -y
-sudo dnf -y install patroni patroni-etcd
 
-chown -R postgres:postgres /var/log/patroni
-```
-
-**Check**
-
-```sh
-patroni --version
-patronictl version
-
-----
-
-patroni 3.3.0
-patronictl version 3.3.0
-```
-
-```sh
-export PGPORT=5432
-export PGUSER=postgres
-export PGGROUP=postgres
-export PGDATA="/var/lib/pgsql/16/data"
-export PGBIN="/usr/pgsql-16/bin"
-export PGBINNAME="postgres"
-export PGSOCKET="/var/run/postgresql"
-export ETCD1=etcd01:2379
-export ETCD2=etcd02:2379
-export ETCD3=etcd03:2379
-
-CLUSTER_NAME="demo-cluster-1"
-MY_NAME=$(hostname --short)
-MY_IP=$(hostname -I | awk ' {print $1}')
-
-cat <<EOF | sudo tee /etc/patroni/patroni.yml
-scope: $CLUSTER_NAME
-namespace: /db/
-name: $MY_NAME
-
-log:
-  type: plain
-  level: INFO
-  traceback_level: ERROR
-  format: "%(asctime)s %(levelname)s: %(message)s"
-  dateformat: ""
-  max_queue_size: 1000
-  dir: /var/log/patroni
-  file_num: 4
-  file_size: 25000000  # bytes
-  loggers:
-    patroni.postmaster: WARNING
-    urllib3: WARNING
-
-restapi:
-  listen: "0.0.0.0:8008"
-  connect_address: "$MY_IP:8008"
-  authentication:
-    username: patroni
-    password: mySupeSecretPassword
-
-etcd3:
-    hosts:
-    - ${ETCD1}
-    - ${ETCD2}
-    - ${ETCD3}
-
-bootstrap:
-  dcs:
-    ttl: 30
-    loop_wait: 10
-    retry_timeout: 10
-    maximum_lag_on_failover: 1048576
-    master_start_timeout: 300
-    postgresql:
-      use_pg_rewind: true
-      use_slots: true
-      parameters:
-        archive_mode: "on"
-        archive_command: "/bin/true"
-
-  initdb:
-  - encoding: UTF8
-  - data-checksums
-  - auth-local: peer
-  - auth-host: scram-sha-256
-
-  pg_hba:
-  - host replication replicator 0.0.0.0/0 scram-sha-256
-  - host all all 0.0.0.0/0 scram-sha-256
-
-  # Some additional users which needs to be created after initializing new cluster
-  users:
-    admin:
-      password: admin%
-      options:
-        - createrole
-        - createdb
-
-postgresql:
-  listen: "0.0.0.0:$PGPORT"
-  connect_address: "$MY_IP:$PGPORT"
-  data_dir: $PGDATA
-  bin_dir: $PGBIN
-  bin_name:
-    postgres: $PGBINNAME
-  pgpass: /tmp/pgpass0
-  authentication:
-    replication:
-      username: replicator
-      password: confidential
-    superuser:
-      username: $PGUSER
-      password: my-super-password
-    rewind:
-      username: rewind_user
-      password: rewind_password
-  parameters:
-    unix_socket_directories: "$PGSOCKET,/tmp"
-
-#watchdog:
-#  mode: required
-#  device: /dev/watchdog
-#  safety_margin: 5
-
-tags:
-  nofailover: false
-  noloadbalance: false
-  clonefrom: false
-  nosync: false
-EOF
-chown -R postgres:postgres /etc/patroni
-```
-
-Validate Patroni configuration
-
-```sh
-patroni --validate-config /etc/patroni/patroni.yml
-```
-
-```sh
-systemctl enable --now patroni
-
-sleep 5
-
-patronictl -c /etc/patroni/patroni.yml list
-```
-
-```
-+ Cluster: demo-cluster-1 (7369029293996131125) ---+-----------+
-| Member  | Host        | Role    | State     | TL | Lag in MB |
-+---------+-------------+---------+-----------+----+-----------+
-| pgmel01 | 172.28.5.11 | Leader  | running   |  1 |           |
-| pgmel02 | 172.28.5.12 | Replica | streaming |  1 |         0 |
-| pgmel03 | 172.28.5.13 | Replica | streaming |  1 |         0 |
-+---------+-------------+---------+-----------+----+-----------+
-```
-
->[!note]
->Once Patroni has initialized the cluster for the first time and settings have been stored in the DCS, all future changes to the `bootstrap.dcs` section of the YAML configuration will not take any effect! If you want to change them please use either [patronictl edit-config](https://patroni.readthedocs.io/en/latest/patronictl.html#patronictl-edit-config) or the Patroni [REST API](https://patroni.readthedocs.io/en/latest/rest_api.html#rest-api).
-
-## HAProxy
-
-**Prepare**
-
-```sh
-# update
-sudo dnf update -y
-
-# timezone
-sudo rm -rf /etc/localtime
-sudo ln -s /usr/share/zoneinfo/America/New_York /etc/localtime
-
-# chrony
-sudo dnf install -y chrony
-sudo systemctl enable --now chronyd
-
-# extras
-sudo dnf install -y bind-utils hostname iproute
-```
-
-**Install**
-
-```sh
-sudo dnf install -y haproxy
-sudo cp /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.bck
-```
-
-```sh
-export PGPORT=5432
-export PGNODE1=pg01
-export PGNODE2=pg02
-export PGNODE3=pg03
-
-cat <<EOF | sudo tee /etc/haproxy/haproxy.cfg
-global
-    maxconn 100
-    log /dev/log    local0
-    log /dev/log    local1 notice
-    chroot /var/lib/haproxy
-    stats socket /var/lib/haproxy/stats mode 660 level admin expose-fd listeners
-    stats timeout 30s
-    user haproxy
-    group haproxy
-    daemon
-
-defaults
-    mode               tcp
-    log                global
-    retries            2
-    timeout queue      5s
-    timeout connect    5s
-    timeout client     30m
-    timeout server     30m
-    timeout check      15s
-
-listen stats
-    mode http
-    bind *:7000
-    stats enable
-    stats uri /
-
-listen read-write
-    bind *:5000
-    option httpchk OPTIONS /read-write
-    http-check expect status 200
-    default-server inter 3s fastinter 1s fall 3 rise 4 on-marked-down shutdown-sessions
-    server $PGNODE1 $PGNODE1:$PGPORT maxconn 100 check port 8008
-    server $PGNODE2 $PGNODE2:$PGPORT maxconn 100 check port 8008
-    server $PGNODE3 $PGNODE3:$PGPORT maxconn 100 check port 8008
-
-listen read-only
-    balance roundrobin
-    bind *:5001
-    option httpchk OPTIONS /replica
-    http-check expect status 200
-    default-server inter 3s fastinter 1s fall 3 rise 4 on-marked-down shutdown-sessions
-    server $PGNODE1 $PGNODE1:$PGPORT maxconn 100 check port 8008
-    server $PGNODE2 $PGNODE2:$PGPORT maxconn 100 check port 8008
-    server $PGNODE3 $PGNODE3:$PGPORT maxconn 100 check port 8008
-EOF
-sudo systemctl enable --now haproxy
-sudo systemctl status haproxy --no-pager
-```
-
-```sh
-curl -s http://pg01:8008
-```
-
-```
-{
-  "state": "running",
-  "postmaster_start_time": "2024-05-29 11:28:11.914207-04:00",
-  "role": "master",
-  "server_version": 160003,
-  "xlog": {
-    "location": 84205792
-  },
-  "timeline": 1,
-  "replication": [
-    {
-      "usename": "replicator",
-      "application_name": "pg02",
-      "client_addr": "172.28.5.12",
-      "state": "streaming",
-      "sync_state": "async",
-      "sync_priority": 0
-    },
-    {
-      "usename": "replicator",
-      "application_name": "pg03",
-      "client_addr": "172.28.5.13",
-      "state": "streaming",
-      "sync_state": "async",
-      "sync_priority": 0
-    }
-  ],
-  "dcs_last_seen": 1716996792,
-  "database_system_identifier": "7374443775163790452",
-  "patroni": {
-    "version": "3.3.0",
-    "scope": "demo-cluster-1",
-    "name": "pg01"
-  }
-}
-```
-
-```sh
-curl -s http://pg02:8008
-```
-
-```
-{
-  "state": "running",
-  "postmaster_start_time": "2024-05-29 11:28:26.794000-04:00",
-  "role": "replica",
-  "server_version": 160003,
-  "xlog": {
-    "received_location": 84205792,
-    "replayed_location": 84205792,
-    "replayed_timestamp": "2024-05-29 11:29:42.060016-04:00",
-    "paused": false
-  },
-  "timeline": 1,
-  "replication_state": "streaming",
-  "dcs_last_seen": 1716996822,
-  "database_system_identifier": "7374443775163790452",
-  "patroni": {
-    "version": "3.3.0",
-    "scope": "demo-cluster-1",
-    "name": "pg02"
-  }
-}
-```
-
-http://haproxy01:7000
-
-![[Pasted image 20240514212518.png]]
-
-**Test**
-
-```
-psql -U postgres -d postgres -h haproxy01 -p 5000 -c "SELECT pg_is_in_recovery();"
-
- pg_is_in_recovery
--------------------
- f
-```
-
-```
-psql -U postgres -d postgres -h haproxy01 -p 5001 -c "SELECT pg_is_in_recovery();"
-
- pg_is_in_recovery
--------------------
- t
-```
 
 ## References:
 
-- [EDB Docs - Installing and configuring etcd](https://www.enterprisedb.com/docs/supported-open-source/patroni/installing_etcd/)
-- [VMware Postgres High Availability with Patroni](https://docs.vmware.com/en/VMware-Postgres/16.2/vmware-postgres/bp-patroni-setup.html)
-- [EDB Docs - Quick start on RHEL 8 (enterprisedb.com)](https://www.enterprisedb.com/docs/supported-open-source/patroni/rhel8_quick_start/)
-- [Deploy a highly available Postgres cluster on Oracle Cloud Infrastructure](https://docs.oracle.com/en/learn/deploy-ha-postgres-oci/index.html#task-2-install-and-configure-the-software)
-- [High availability - Percona Distribution for PostgreSQL](https://docs.percona.com/postgresql/16/solutions/high-availability.html)
-- 
+1. [pgBackRest User Guide - RHEL - S3-Compatible Object Store Support](https://pgbackrest.org/user-guide-rhel.html#s3-support)
+2. [Pgackrest and Minio, the perfect match (linkedin.com)](https://www.linkedin.com/pulse/pgackrest-minio-perfect-match-st%C3%A9phane-maurizio)
+3. [Using pgBackRest to backup your PostgreSQL instances to a s3 compatible storage - dbi Blog](https://www.dbi-services.com/blog/using-pgbackrest-to-backup-your-postgresql-instances-to-a-s3-compatible-storage/)
+4. [pgBackRest S3 configuration | pgstef’s blog](https://pgstef.github.io/2019/07/19/pgbackrest_s3_configuration.html)
+5. 
