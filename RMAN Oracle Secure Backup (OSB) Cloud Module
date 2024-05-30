@@ -1,0 +1,89 @@
+---
+database: Oracle
+title: Backup and Recovery
+created: 05/29/2024 10:25
+---
+## Hardware and Software Prerequisites for Oracle Secure Backup Cloud Module
+
+- Java 1.7 or later on the computer where you plan to run the S3 Backup Installer
+
+```sh
+$ORACLE_HOME/jdk/bin/java -version
+
+java version "1.8.0_401"
+Java(TM) SE Runtime Environment (build 1.8.0_401-b10)
+Java HotSpot(TM) 64-Bit Server VM (build 25.401-b10, mixed mode)
+```
+
+- S3 Backup Installer File
+
+[Oracle Secure Backup Cloud Module for Amazon S3](https://www.oracle.com/database/technologies/secure-backup-s3.html)
+
+```sh
+unzip -q /tmp/osbws_installer.zip -d /tmp
+```
+
+- Oracle Wallet Directory
+
+```
+$ORACLE_HOME/dbs/osbws_wallet
+```
+
+- System Time
+
+```sh
+systemctl status chronyd | grep "Active"
+
+   Active: active (running) since Mon 2024-05-20 11:07:21 EDT; 1 weeks 2 days ago
+
+Wed May 29 15:22:52 EDT 2024
+```
+
+## Installing the OSB Cloud Module Library
+
+### Minio
+
+[[PgBackRest - S3 and S3-Compatible Object Store Support (Minio, OCI, etc...)]]
+
+```sh
+$ORACLE_HOME/jdk/bin/java -jar /tmp/osbws_install.jar
+```
+
+[Oracle Secure Backup (OSB) Cloud Module Parameters](https://docs.oracle.com/en/database/oracle/oracle-database/19/rcmrf/oracle-secure-backup-osb-cloud-module.html#GUID-964AADD2-3405-4476-8698-E9F2133CB5B7)
+
+```sh
+# -useHttps \
+
+$ORACLE_HOME/jdk/bin/java -jar /tmp/osbws_install.jar \
+  -awsEndpoint minio \
+  -awsPort 9000 \
+  -location us \
+  -AWSID mmvmlLlvbrWBoRdbls7E \
+  -AWSKey zWSI13ItNdUSaXNTqMeMULuobeQf7xZ2QXgFfvxy \
+  -walletDir $ORACLE_HOME/dbs/osbws_wallet \
+  -libDir $ORACLE_HOME/lib \
+  -debug
+
+java -jar osbws_install.jar -awsEndpoint <minio_endpoint> -AWSID <AWS ID> -AWSKey <AWS Secret Key> -
+otnUser <OTN User ID> -otnPass <OTN Password> -walletDir <Wallet
+Directory> -configFile <Cloud Backup Configuration File Name> -libDir
+<Location to store Cloud Backup Module/Library> -proxyHost wwwproxy.yourcompany.com –proxyPort <your proxy port>
+```
+
+FAILEDDD
+
+```
+
+```
+
+When the installer completes, you should have these three files on your system:
+
+
+
+
+## References:
+
+- [Oracle Secure Backup (OSB) Cloud Module](https://docs.oracle.com/en/database/oracle/oracle-database/19/rcmrf/oracle-secure-backup-osb-cloud-module.html)
+- [Oracle RMAN to MinIO Backup](https://blog.min.io/oracle-rman-minio-backup/)
+- [OSB Cloud Module - FAQ (Doc ID 740226.1)|](https://support.oracle.com/epmos/faces/DocumentDisplay?_afrLoop=294844495579278&id=740226.1)
+- [Oracle Database Backup To Cloud: Amazon Simple Storage Service (S3)](https://www.oracle.com/technetwork/database/features/availability/twp-oracledbcloudbackup-130129.pdf)
