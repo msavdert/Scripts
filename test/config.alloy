@@ -2,43 +2,4 @@ declare "my_log_processor" {
   logging {
     level  = "debug"
   }
-
-  prometheus.remote_write "default" {
-    endpoint {
-      url = "http://prometheus:9090/api/v1/write"
-    }
-    external_labels = {
-      owner  = "nyct",
-      env   = "test",
-    }
-  }
-  
-  // Alloy metrics
-  prometheus.exporter.self "alloy" {
-  }
-  
-  discovery.relabel "alloy" {
-    targets = prometheus.exporter.self.alloy.targets
-  
-    rule {
-      target_label = "instance"
-      replacement  = constants.hostname
-    }
-  
-    rule {
-      target_label = "job"
-      replacement  = "alloy"
-    }
-  }
-  
-  // Collect Alloy metrics.
-  prometheus.relabel "alloy" {
-    forward_to = [prometheus.remote_write.default.receiver]
-  
-    rule {
-      source_labels = ["__name__"]
-      regex         = "go_gc_.*"
-      action        = "drop"
-      }
-  }
 }
