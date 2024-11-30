@@ -1,0 +1,5 @@
+declare "cfg" {
+  logging {
+    level  = "debug"
+  }
+}
