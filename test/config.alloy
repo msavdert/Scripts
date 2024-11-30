@@ -1,4 +1,3 @@
-declare "cfg" {
   logging {
     level  = "debug"
   }
@@ -41,5 +40,3 @@ declare "cfg" {
       action        = "drop"
       }
   }
-
-}
