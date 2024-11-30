@@ -1,7 +1,7 @@
 declare "my_log_processor" {
-  logging {
-    level  = "debug"
-  }
+logging {
+  level  = "debug"
+}
 
   prometheus.remote_write "default" {
     endpoint {
