@@ -1,0 +1,1 @@
+SELECT sql_fulltext FROM gv$sqlarea WHERE sql_id='&1' AND rownum=1;
