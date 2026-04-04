@@ -1,3 +1,7 @@
+REM     Script:     lt2.sql
+REM     Purpose:    Display a blocking lock tree hierarchy and generate kill
+REM                 commands for root blockers.
+
 --Session is displayed as <inst_id>.<sid>
 with lk as (select blocking_instance||'.'||blocking_session blocker, inst_id||'.'||sid waiter 
             from gv$session where blocking_instance is not null and blocking_session is not null)

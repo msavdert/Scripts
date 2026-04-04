@@ -1,3 +1,7 @@
+REM     Script:     killsql.sql
+REM     Purpose:    Generate disconnect commands for sessions currently running a
+REM                 specified SQL_ID.
+
 col username for a25
 col kill_sql_id for a80
 

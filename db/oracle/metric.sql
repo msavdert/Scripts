@@ -1,3 +1,7 @@
+REM     Script:     metric.sql
+REM     Purpose:    Show key Oracle system metrics such as CPU, I/O, throughput,
+REM                 and latency.
+
 col "Time+Delta" for a15
 col "Metric" for a75
 

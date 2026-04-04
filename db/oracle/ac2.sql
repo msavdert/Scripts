@@ -1,3 +1,7 @@
+REM     Script:     ac2.sql
+REM     Purpose:    Summarize active and inactive sessions, including inactive
+REM                 sessions older than one hour and per-user counts.
+
 --PROMPT
 --PROMPT COUNT ACTIVE AND INACTIVE SESSIONS
 --PROMPT ***************************
@@ -31,19 +35,3 @@ select username,g.ACTIVE,g.INACTIVE,(g.ACTIVE+g.INACTIVE) TOTAL from (SELECT s.u
    WHERE s.username IS NOT NULL
 GROUP BY s.username
 ORDER BY 3 DESC) g;
-
---PROMPT ACTIVE AND INACTIVE USERS COUNT
---PROMPT ***************************
---select username,g.ACTIVE,g.INACTIVE,(g.ACTIVE+g.INACTIVE) TOTAL from (SELECT s.username,
---         (SELECT COUNT (*)
---           FROM gv$session ss
---           WHERE ss.username=s.username and ss.status = 'ACTIVE' AND type NOT LIKE 'BACKGROUND')
---            ACTIVE,
---         (SELECT COUNT (*)
---            FROM gv$session ss
---           WHERE s.username=ss.username AND ss.status = 'INACTIVE' AND type NOT LIKE 'BACKGROUND')
---            INACTIVE
---    FROM gv$session s
---   WHERE s.username IS NOT NULL
---GROUP BY s.username
---ORDER BY 3 DESC) g;

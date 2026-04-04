@@ -1,3 +1,7 @@
+REM     Script:     bck.sql
+REM     Purpose:    Show RMAN backup job history with size, duration, and
+REM                 throughput details.
+
 col day format a10
 col start_time format a21
 col end_time format a21

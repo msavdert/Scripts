@@ -1,3 +1,7 @@
+REM     Script:     ts.sql
+REM     Purpose:    Display tablespace utilization across containers using
+REM                 tablespace usage metrics.
+
 col pdb format a10
 col contents format a10
 col tablespace_name format a25

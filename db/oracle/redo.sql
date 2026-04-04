@@ -1,3 +1,7 @@
+REM     Script:     redo.sql
+REM     Purpose:    Display redo log groups, members, size, sequence, and status
+REM                 information.
+
 COLUMN member FORMAT A75
 COLUMN first_change# FORMAT 99999999999999999999
 COLUMN next_change# FORMAT 99999999999999999999

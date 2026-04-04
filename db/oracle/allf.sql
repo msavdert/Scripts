@@ -1,3 +1,7 @@
+REM     Script:     allf.sql
+REM     Purpose:    List Oracle file locations and storage files visible to the
+REM                 database instance.
+
 SET LINES 999 PAGES 999
 COL MB FORMAT 999999
 COL NAME FORMAT A100

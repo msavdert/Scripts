@@ -1,3 +1,7 @@
+REM     Script:     asm.sql
+REM     Purpose:    Display ASM disk group usage, files, clients, and current
+REM                 ASM-related activity.
+
 break on report on disk_group_name skip 1
 compute sum label "Grand Total: " of "Total|GB" "Free|GB" on report
 

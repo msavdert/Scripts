@@ -1,3 +1,6 @@
+REM     Script:     lh.sql
+REM     Purpose:    Show archive log generation distribution by date and hour.
+
 col "date" format a15
 
 col "H00" format 999

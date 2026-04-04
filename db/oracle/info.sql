@@ -1,3 +1,7 @@
+REM     Script:     info.sql
+REM     Purpose:    Display general database, instance, and host information for
+REM                 the current Oracle environment.
+
 col instance_name for a15
 col dbid for 9999999999
 col db_unique_name for a15

@@ -1,3 +1,7 @@
+REM     Script:     ts2.sql
+REM     Purpose:    Display tablespace allocation, autoextend capacity, and free
+REM                 space details.
+
 col dfc format 999
 col contents format a10
 col tablespace_name format a25

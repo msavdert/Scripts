@@ -1,3 +1,7 @@
+REM     Script:     alertf.sql
+REM     Purpose:    Display the alert log file path for the current database
+REM                 instance.
+
 col alert_file format a100
 
 select d.value||'/alert_'||i.instance_name||'.log' as alert_file

@@ -1,3 +1,7 @@
+REM     Script:     lobj.sql
+REM     Purpose:    List locked database objects with owner, object, and session
+REM                 details.
+
 col owner for a15
 col object_name for a30
 col object_type for a15

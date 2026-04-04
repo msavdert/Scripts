@@ -1,3 +1,7 @@
+REM     Script:     lops.sql
+REM     Purpose:    Display long-running database operations with progress and
+REM                 estimated remaining time.
+
 col "User Session" for a20
 col username for a20
 col osuser for a20

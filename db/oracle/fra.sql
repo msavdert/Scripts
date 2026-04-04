@@ -1,3 +1,7 @@
+REM     Script:     fra.sql
+REM     Purpose:    Report Fast Recovery Area configuration, allocation, and
+REM                 usage status.
+
 Prompt +FRA Status
 Prompt ========================
 select

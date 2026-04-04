@@ -1,3 +1,7 @@
+REM     Script:     rmanmon.sql
+REM     Purpose:    Monitor active RMAN operations with channel, I/O, and
+REM                 progress information.
+
 TTITLE LEFT '% Completed. Aggregate is the overall progress:'
 SET LINE 132
 SELECT opname, round(sofar/totalwork*100) "% Complete"

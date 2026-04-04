@@ -1,3 +1,7 @@
+REM     Script:     coe.sql
+REM     Purpose:    Generate SQL Profile transport statements for a given SQL
+REM                 execution plan.
+
 SPO coe_xfr_sql_profile.log;
 SET DEF ON TERM OFF ECHO ON FEED OFF VER OFF HEA ON LIN 2000 PAGES 100 LONG 8000000 LONGC 800000 TRIMS ON TI OFF TIMI OFF SERVEROUT ON SIZE 1000000 NUMF "" SQLP SQL>;
 REM

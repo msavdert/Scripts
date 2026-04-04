@@ -1,3 +1,7 @@
+REM     Script:     dgs.sql
+REM     Purpose:    Display Data Guard transport and apply status, including lag
+REM                 and sequence information.
+
 col dest_id format 9999999
 col name format a15
 col time_diff format a15

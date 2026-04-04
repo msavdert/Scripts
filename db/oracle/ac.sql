@@ -1,3 +1,7 @@
+REM     Script:     ac.sql
+REM     Purpose:    List active foreground sessions with wait details and
+REM                 generate RAC-aware kill commands.
+
 col "User Session" for a12
 col username for a15
 col osuser for a17

@@ -1,3 +1,7 @@
+REM     Script:     killu.sql
+REM     Purpose:    Generate kill commands for sessions whose username matches a
+REM                 provided pattern.
+
 col Kill_Script format a60;
 
 SELECT username,

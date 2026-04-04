@@ -1,3 +1,6 @@
+REM     Script:     taila.sql
+REM     Purpose:    Tail recent alert log messages in SQL output format.
+
 WITH oneday AS
 ( SELECT /*+ materialize */ *  FROM TABLE
   (gv$(cursor(select originating_timestamp, message_text FROM v$diag_alert_ext WHERE ORIGINATING_TIMESTAMP > SYSTIMESTAMP - 1 

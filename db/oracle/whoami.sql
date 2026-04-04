@@ -1,3 +1,7 @@
+REM     Script:     whoami.sql
+REM     Purpose:    Display current session, user, network, and database context
+REM                 information.
+
 declare
 v_version number;
 v_cdb varchar2(3);

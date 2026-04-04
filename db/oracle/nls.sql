@@ -1,3 +1,7 @@
+REM     Script:     nls.sql
+REM     Purpose:    Compare NLS settings across database, instance, and session
+REM                 scopes.
+
 COL PARAMETER FOR A30
 COL DATABASE FOR A30
 COL INSTANCE FOR A30

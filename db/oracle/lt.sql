@@ -1,3 +1,6 @@
+REM     Script:     lt.sql
+REM     Purpose:    Display a blocking lock tree hierarchy for current sessions.
+
 col lock_tree format a15
 
 WITH lk
